@@ -125,6 +125,8 @@ class TrainRunner(object):
     """
 
     iparams = {}
+    for k, v in params.items():
+      iparams[k] = v
     iparams["batch_size"] = params["batch_size"] // FLAGS.num_cores
     iparams["dataset_num_shards"] = FLAGS.num_cores // FLAGS.tpu_cores_per_host
 
