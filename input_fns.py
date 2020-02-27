@@ -114,21 +114,22 @@ _loaded_dataset = None
 def make_source_tokens(index, num_hosts, n_vocab):
   global _loaded_dataset
   if _loaded_dataset:
-    return _loaded_dataset
-  #tokens = [(_ + 0) for _ in range(0, n_ctx+1)]
-  if FLAGS.dataset is not None:
-    tokens = []
-    npz = np.load(FLAGS.dataset)
-    for item in npz.files:
-      tokens.extend(npz[item])
-    if FLAGS.export_dataset is not None:
-      export_source_tokens(FLAGS.export_dataset, tokens)
+    tokens = _loaded_dataset
   else:
-    tokens = [(_ + 0) % n_vocab for _ in range(0, 100000)]
-  tf.logging.info("Dataset has %d tokens", len(tokens))
+    #tokens = [(_ + 0) for _ in range(0, n_ctx+1)]
+    if FLAGS.dataset is not None:
+      tokens = []
+      npz = np.load(FLAGS.dataset)
+      for item in npz.files:
+        tokens.extend(npz[item])
+      if FLAGS.export_dataset is not None:
+        export_source_tokens(FLAGS.export_dataset, tokens)
+    else:
+      tokens = [(_ + 0) % n_vocab for _ in range(0, 100000)]
+    tf.logging.info("Dataset has %d tokens", len(tokens))
+    _loaded_dataset = dset
   t = tf.broadcast_to(tokens, [len(tokens)])
   dset = tf.data.Dataset.from_tensors(t);
-  _loaded_dataset = dset
   return dset
 
 def bpe_text(batch_size, files, iterations, stitch, amount=1024, batch=True):
