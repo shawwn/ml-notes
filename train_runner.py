@@ -243,7 +243,7 @@ class TrainRunner(object):
     self.infeed_thread = threading.Thread(target=infeed_thread_fn, daemon=True)
     self.infeed_thread.start()
 
-  def train(self, num_threads=2):
+  def train(self, num_threads=1):
     """Run the Train steps on the TPU device.
 
     Args:
@@ -257,6 +257,7 @@ class TrainRunner(object):
     cur_step = 0
     thread_id = 0
     checkpoint_threads = []
+    need_final_checkpoint = False
     tf.logging.info("TrainRunner: step %d", cur_step)
     for i in range(num_threads):
       checkpoint_threads.append(None)
@@ -265,11 +266,18 @@ class TrainRunner(object):
       tf.logging.info("TrainRunner: start next %d steps", self.iterations)
       cur_step += self.iterations
       loss = self.sess.run([self.loss])
-      if checkpoint_threads[thread_id] is not None:
-        checkpoint_threads[thread_id].join()
-      checkpoint_threads[thread_id] = threading.Thread(
-          target=checkpoint_thread_fn, args=(self.saver, self.sess), daemon=True)
-      checkpoint_threads[thread_id].start()
+      thread = checkpoint_threads[thread_id]
+      if checkpoint_threads[thread_id] is not None and checkpoint_threads[thread_id].is_alive():
+        tf.logging.info("TrainRunner: checkpoint thread still active; skipping")
+        need_final_checkpoint = True
+      else:
+        tf.logging.info("TrainRunner: starting checkpoint thread...")
+        if checkpoint_threads[thread_id] is not None:
+          checkpoint_threads[thread_id].join()
+        checkpoint_threads[thread_id] = threading.Thread(
+            target=checkpoint_thread_fn, args=(self.saver, self.sess), daemon=True)
+        checkpoint_threads[thread_id].start()
+        need_final_checkpoint = False
       thread_id += 1
       if thread_id >= num_threads:
         thread_id = 0
@@ -278,13 +286,24 @@ class TrainRunner(object):
           "TrainRunner: step {} loss {} step time {} sec {} examples/sec"
           .format(cur_step, loss, end - start,
                   self.iterations * FLAGS.train_batch_size / (end - start)))
-
+    if need_final_checkpoint:
+      tf.logging.info("TrainRunner: starting final checkpoint thread...")
+      checkpoint_threads.append(None)
+      i = len(checkpoint_threads) - 1
+      checkpoint_threads[i] = threading.Thread(
+          target=checkpoint_thread_fn, args=(self.saver, self.sess), daemon=True)
+      checkpoint_threads[i].start()
+    tf.logging.info("TrainRunner: waiting for infeed thread...")
     self.infeed_thread.join()
+    tf.logging.info("TrainRunner: waiting for checkpoint threads...")
     for i in range(num_threads):
       if checkpoint_threads[i] is not None:
         checkpoint_threads[i].join()
         checkpoint_threads[i] = None
+    tf.logging.info("TrainRunner: waiting for checkpoint threads (done)")
 
   def shutdown(self):
+    tf.logging.info("TrainRunner: shutting down...")
     self.init_sess.run(self.tpu_shutdown)
+    tf.logging.info("TrainRunner: shutting down (done)")
 
