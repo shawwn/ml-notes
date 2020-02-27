@@ -206,7 +206,7 @@ def gpt2_input(params):
     for fname in FLAGS.dataset.split(','):
       files.extend(sorted(tf.io.gfile.glob(fname)))
     assert len(files) > 0
-    dset = bpe_text(batch_size, files, iterations=iterations, stitch=2, amount=params['n_ctx'], batch=True)
+    dset = bpe_text(batch_size, files, iterations=iterations, stitch=min(2, len(files)), amount=params['n_ctx'], batch=True)
   else:
     dset = make_source_tokens(current_host, num_hosts, n_vocab=params['n_vocab'])
     batch=True
