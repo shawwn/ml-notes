@@ -2,6 +2,8 @@ import time
 
 import numpy as np
 
+import tensorflow as tf
+
 from tensorflow.core.protobuf import config_pb2
 from tensorflow.core.protobuf import tensorflow_server_pb2
 from tensorflow.python.client import session
@@ -18,6 +20,16 @@ from tensorflow.python.platform import test
 from tensorflow.python.training import input as input_ops
 from tensorflow.python.training import queue_runner_impl
 from tensorflow.python.training import server_lib
+
+import train_runner
+from train_flags import FLAGS
+
+from pprint import pprint as pp
+
+from model_fns import gpt2_model
+from input_fns import gpt2_input
+
+import json
 
 class GrpcServerTest(test.TestCase):
 
@@ -109,6 +121,51 @@ class GrpcServerTest(test.TestCase):
     self.assertAllEqual(37, isolate_sess_0.run(v))
     self.assertAllEqual([19, 86], isolate_sess_1.run(v))
 
+  @test_util.run_v1_only("b/120545219")
+  def testTrainRunner(self):
+    FLAGS.iterations_per_loop = 100
+    FLAGS.train_steps = 1000
+    trunner = train_runner.TrainRunner(
+        iterations=FLAGS.iterations_per_loop, train_steps=FLAGS.train_steps)
+    def input_fn(params):
+      tokens = [[_ for _ in range(0, 1024)]] * params['batch_size']
+      labels = [[_ for _ in range(1, 1025)]] * params['batch_size']
+      t = tf.broadcast_to(tokens, [len(tokens), len(tokens[0])])
+      l = tf.broadcast_to(labels, [len(labels), len(labels[0])])
+      #dset1 = tf.data.Dataset.from_tensor_slices(t);
+      #dset2 = tf.data.Dataset.from_tensor_slices(l);
+      dset1 = tf.data.Dataset.from_tensors(t);
+      dset2 = tf.data.Dataset.from_tensors(l);
+      dset = tf.data.Dataset.zip((dset1, dset2))
+      dset = dset.repeat()
+      return dset
+    def create_train_op(loss, params):
+      return tf.identity(loss)
+    def model_fn(features, labels, mode, params):
+      pp(['features', features])
+      pp(['labels', labels])
+      pp(['mode', mode])
+      pp(['params', params])
+      loss = tf.constant(0.0)
+      if mode == tf.estimator.ModeKeys.TRAIN:
+        train_op = create_train_op(loss, params)
+        if params["use_tpu"]:
+          return tf.contrib.tpu.TPUEstimatorSpec(mode, loss=loss, train_op=train_op)
+        else:
+          return tf.estimator.EstimatorSpec(mode, loss=loss, train_op=train_op)
+    #params = {'batch_size': FLAGS.train_batch_size}
+    #params = {'batch_size': 128, 'use_tpu': True, 'precision': 'float32'}
+    with open('117M.json') as f:
+      params = json.load(f)
+    params['use_tpu'] = True
+    params['batch_size'] = FLAGS.num_cores
+    params['precision'] = 'float32'
+    trunner.initialize(gpt2_input, gpt2_model, params)
+    tf.logging.info('trunner.initialize(): Done. Training...')
+    trunner.train()
+    tf.logging.info('trunner.train(): Done. Shutting down...')
+    trunner.shutdown()
+    tf.logging.info('trunner.shutdown(): Done.')
 
 if __name__ == "__main__":
   test.main()
