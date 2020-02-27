@@ -123,8 +123,9 @@ class GrpcServerTest(test.TestCase):
 
   @test_util.run_v1_only("b/120545219")
   def testTrainRunner(self):
-    FLAGS.iterations_per_loop = 100
-    FLAGS.train_steps = 1000
+    #FLAGS.iterations_per_loop = 100
+    FLAGS.iterations_per_loop = 200
+    FLAGS.train_steps = 2000
     trunner = train_runner.TrainRunner(
         iterations=FLAGS.iterations_per_loop, train_steps=FLAGS.train_steps)
     def input_fn(params):
@@ -158,9 +159,14 @@ class GrpcServerTest(test.TestCase):
     with open('117M.json') as f:
       params = json.load(f)
     params['use_tpu'] = True
-    params['batch_size'] = FLAGS.num_cores
-    params['precision'] = 'float32'
+    batch_size_per_core = params['batch_size_per_core'] if 'batch_size_per_core' in params else 1
+    FLAGS.train_batch_size = FLAGS.num_cores * batch_size_per_core
+    params['batch_size'] = FLAGS.train_batch_size
+    if 'precision' not in params:
+      params['precision'] = 'float32'
+    pp(params)
     trunner.initialize(gpt2_input, gpt2_model, params)
+    pp(params)
     tf.logging.info('trunner.initialize(): Done. Training...')
     trunner.train()
     tf.logging.info('trunner.train(): Done. Shutting down...')

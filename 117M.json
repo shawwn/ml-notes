@@ -1,4 +1,5 @@
 {
+    "batch_size_per_core": 1,
     "n_head": 12,
     "encoder_path": "encoder",
     "n_vocab": 50257,
