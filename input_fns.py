@@ -109,7 +109,12 @@ def export_source_tokens(tfrecord_dir, tokens):
   with TFRecordExporter(tfrecord_dir, 1) as tfr:
     tfr.add_tokens(tokens)
 
+_loaded_dataset = None
+
 def make_source_tokens(index, num_hosts, n_vocab):
+  global _loaded_dataset
+  if _loaded_dataset:
+    return _loaded_dataset
   #tokens = [(_ + 0) for _ in range(0, n_ctx+1)]
   if FLAGS.dataset is not None:
     tokens = []
@@ -123,6 +128,7 @@ def make_source_tokens(index, num_hosts, n_vocab):
   tf.logging.info("Dataset has %d tokens", len(tokens))
   t = tf.broadcast_to(tokens, [len(tokens)])
   dset = tf.data.Dataset.from_tensors(t);
+  _loaded_dataset = dset
   return dset
 
 def bpe_text(batch_size, files, iterations, stitch, amount=1024, batch=True):
