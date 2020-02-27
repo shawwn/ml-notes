@@ -302,11 +302,22 @@ class TrainRunner(object):
       end = time.time()
       tf.logging.info("TrainRunner: fetching global_step...")
       gs = self.sess.run(self.global_step)
+      step_sec = end - start
+      gs_sec = self.iterations / step_sec
+      ex_sec = self.iterations * FLAGS.train_batch_size / (end - start)
       # Write out summary to tensorboard.
       if output_summaries:
         tf.logging.info("TrainRunner: writing summaries...")
         with tf.Graph().as_default():
-          eval_results = {'loss': loss}
+          eval_results = {
+              'loss': loss,
+              'iterations_per_step': self.iterations,
+              'seconds_per_step': step_sec,
+              'global_step_per_second': gs_sec,
+              'examples_per_second': ex_sec,
+              'train_batch_size_per_core': FLAGS.train_batch_size // FLAGS.num_cores,
+              'num_cores': FLAGS.num_cores,
+              }
           for metric in eval_results:
             values = eval_results[metric]
             if not isinstance(values, list):
@@ -324,9 +335,8 @@ class TrainRunner(object):
             tf.logging.info("TrainRunner: flushing summaries (%d) (done)", cur_step)
           tflex.parallelize([self.cur_step], thunk)
       tf.logging.info(
-          "TrainRunner: step {} global {} end {} loss {} step time {:.2f} sec {:.7f} examples/sec"
-          .format(self.cur_step, gs, end_step, loss, end - start,
-                  self.iterations * FLAGS.train_batch_size / (end - start)))
+          "TrainRunner: step={} global={} end={} loss={} step_time={:.2f}sec examples/sec={:.7f} global_step/sec={:.7f}"
+          .format(self.cur_step, gs, end_step, loss, step_sec, ex_sec, gs_sec))
     if need_final_checkpoint:
       tf.logging.info("TrainRunner: starting final checkpoint thread...")
       checkpoint_threads.append(None)
