@@ -124,8 +124,19 @@ class GrpcServerTest(test.TestCase):
   @test_util.run_v1_only("b/120545219")
   def testTrainRunner(self):
     #FLAGS.iterations_per_loop = 100
-    FLAGS.iterations_per_loop = 200
+    #params = {'batch_size': FLAGS.train_batch_size}
+    #params = {'batch_size': 128, 'use_tpu': True, 'precision': 'float32'}
+    with open(FLAGS.params) as f:
+      params = json.load(f)
+    params['use_tpu'] = True
+    batch_size_per_core = params['batch_size_per_core'] if 'batch_size_per_core' in params else 1
+    FLAGS.train_batch_size = FLAGS.num_cores * batch_size_per_core
+    FLAGS.iterations_per_loop = 20 if 'iterations' not in params else params['iterations']
     FLAGS.train_steps = 2000
+    params['batch_size'] = FLAGS.train_batch_size
+    if 'precision' not in params:
+      params['precision'] = 'float32'
+    pp(params)
     trunner = train_runner.TrainRunner(
         iterations=FLAGS.iterations_per_loop, train_steps=FLAGS.train_steps)
     def input_fn(params):
@@ -154,17 +165,6 @@ class GrpcServerTest(test.TestCase):
           return tf.contrib.tpu.TPUEstimatorSpec(mode, loss=loss, train_op=train_op)
         else:
           return tf.estimator.EstimatorSpec(mode, loss=loss, train_op=train_op)
-    #params = {'batch_size': FLAGS.train_batch_size}
-    #params = {'batch_size': 128, 'use_tpu': True, 'precision': 'float32'}
-    with open('117M.json') as f:
-      params = json.load(f)
-    params['use_tpu'] = True
-    batch_size_per_core = params['batch_size_per_core'] if 'batch_size_per_core' in params else 1
-    FLAGS.train_batch_size = FLAGS.num_cores * batch_size_per_core
-    params['batch_size'] = FLAGS.train_batch_size
-    if 'precision' not in params:
-      params['precision'] = 'float32'
-    pp(params)
     trunner.initialize(gpt2_input, gpt2_model, params)
     pp(params)
     tf.logging.info('trunner.initialize(): Done. Training...')

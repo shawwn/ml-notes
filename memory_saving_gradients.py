@@ -201,7 +201,8 @@ def gradients(ys, xs, grad_ys=None, checkpoints='collection', **kwargs):
                     len(ops_to_copy), fwd_ops, [r.op for r in ys], checkpoints)
     debug_print("ops_to_copy = %s", ops_to_copy)
     debug_print("Processing list %s", ys)
-    copied_sgv, info = ge.copy_with_input_replacements(ge.sgv(ops_to_copy), {})
+    sgv_ops_to_copy = ge.sgv(ops_to_copy)
+    copied_sgv, info = ge.copy_with_input_replacements(sgv_ops_to_copy, {})
     for origin_op, op in info._transformed_ops.items():
         op._set_device(origin_op.node_def.device)
     copied_ops = info._transformed_ops.values()
@@ -356,7 +357,7 @@ def _is_iterable(o):
     return False
   return True
 
-DEBUG_LOGGING=False
+DEBUG_LOGGING=True
 def debug_print(s, *args):
   """Like logger.log, but also replaces all TensorFlow ops/tensors with their
   names. Sensitive to value of DEBUG_LOGGING, see enable_debug/disable_debug

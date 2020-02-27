@@ -108,7 +108,9 @@ class TrainRunner(object):
     if cluster_spec:
       self.config.cluster_def.CopyFrom(cluster_spec.as_cluster_def())
     self.init_sess = tf.Session(self.cluster_resolver.get_master(), config=self.config)
+    tf.logging.info("TrainRunner: initializing TPU session...")
     self.init_sess.run(tpu_init)
+    tf.logging.info("TrainRunner: initializing TPU session (done)")
 
   def device_for_host(self, task=0, cpu=0):
     job_name = FLAGS.tpu_job_name or "worker" # "tpu_worker"
@@ -203,7 +205,7 @@ class TrainRunner(object):
     def get_tpu_step(mparams):
       """Get the TPU graph generation function."""
 
-      def tpu_step(loss):
+      def tpu_pre(loss):
         """Generate the TPU graph."""
         del loss
         values = self.infeed_queue[0].generate_dequeue_op(tpu_device=0)
@@ -213,18 +215,36 @@ class TrainRunner(object):
         labels = unflattened_inputs["labels"]
         estimator_spec = model_fn(features, labels, tf.estimator.ModeKeys.TRAIN,
                                   mparams)
+        return estimator_spec
+
+      def tpu_make(estimator_spec):
         loss, train_op = estimator_spec.loss, estimator_spec.train_op
         with tf.device(device_for_tpu_core()):
           with tf.control_dependencies([train_op]):
-            return tf.identity(loss)
+            return tf.identity(loss, name="tpu_loss_op")
 
-      return tpu_step
+      def tpu_step(loss):
+        estimator_spec = tpu_pre(loss)
+        return tpu_make(estimator_spec)
 
-    tpu_step = get_tpu_step(params)
+      return tpu_pre, tpu_make, tpu_step
+
+    tpu_pre, tpu_make, tpu_step = get_tpu_step(params)
+
+    if False:
+      with tf.Graph().as_default() as self.tpu_graph:
+        params['use_tpu'] = False
+        self.tpu_global_step = tflex.get_or_create_global_step()
+        self.tpu_spec = tpu_pre(_INITIAL_LOSS)
+        self.tpu_sess = tf.Session(self.cluster_resolver.get_master(), config=self.config, graph=self.graph)
+        import pdb; pdb.set_trace()
+        self.tpu_op = tpu_make(self.tpu_spec)
+        params['use_tpu'] = True
 
     @tpu_function.on_device_training_loop
     def tpu_loop():
       return tpu.repeat(self.iterations, tpu_step, [_INITIAL_LOSS])
+      #return tpu_step(_INITIAL_LOSS)
 
     (self.loss,) = tpu.shard(
         tpu_loop,
@@ -238,16 +258,23 @@ class TrainRunner(object):
                          FLAGS.model_dir, "graph.pbtxt")
 
     # Build tpu train model session and initialize graph
-    self.sess = tf.Session(
-        self.cluster_resolver.get_master(),
-        config=self.config)
+    self.sess = tf.Session(self.cluster_resolver.get_master(), config=self.config)
     self.sess.run(initializer)
 
     if FLAGS.restore_dir is not None:
       ckpt = tf.train.latest_checkpoint(FLAGS.restore_dir)
       if ckpt is not None:
+        if FLAGS.restore_trainable_variables:
+          var_list = tf.trainable_variables()
+          if params['n_ctx'] != 1024:
+            var_list = [x for x in var_list if '/wpe' not in x.name]
+        else:
+          var_list = tf.global_variables()
+        saver = tf.train.Saver(var_list=var_list, restore_sequentially=True)
         tf.logging.info('Restoring %s', ckpt)
-        self.saver.restore(self.sess, ckpt)
+        for x in var_list:
+          tf.logging.info('\t%s', repr(x))
+        saver.restore(self.sess, ckpt)
         tf.logging.info('Restoring %s (done)', ckpt)
     self.cur_step = self.sess.run(self.global_step)
 

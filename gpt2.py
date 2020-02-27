@@ -212,11 +212,12 @@ def model(X, params, labels=None, past=None, scope='model', reuse=False, train=F
         presents = []
         pasts = tf.unstack(past, axis=1) if past is not None else [None] * params["n_layer"]
         assert len(pasts) == params["n_layer"]
-        checkpoint=False
-        every = 1
+        checkpoint=False if 'memory_saving_gradients' not in params else params['memory_saving_gradients']
+        every = 1 if 'memory_saving_checkpoints' not in params else params['memory_saving_checkpoints']
         for layer, past in enumerate(pasts):
             h, present = block(h, 'h%d' % layer, past=past, params=params, attn=attn, train=train, batch_size=batch, seq_length=sequence)
-            if checkpoint and layer % every == 0:
+            if checkpoint and (isinstance(every, int) and layer % every == 0 or layer in every):
+                tf.logging.info('checkpointing layer %d', layer)
                 tf.add_to_collection('checkpoints', h)
             presents.append(present)
         results['present'] = tf.stack(presents, axis=1)

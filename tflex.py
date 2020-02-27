@@ -211,12 +211,20 @@ def reroute(addr, host=None):
 
 
 class TPUClusterResolver(BaseTPUClusterResolver):
-  def __init__(self, *args, host=None, **kws):
+  def __init__(self, *args, host=None, node_count=None, node_offset=None, **kws):
     super(TPUClusterResolver, self).__init__(*args, **kws)
     if host is None:
       if 'TPU_HOST' in os.environ:
         host = os.environ['TPU_HOST']
     self._host = host
+    if node_count is None:
+      if 'TPU_NODE_COUNT' in os.environ:
+        node_count = int(os.environ['TPU_NODE_COUNT'])
+    self._node_count = node_count
+    if node_offset is None:
+      if 'TPU_NODE_OFFSET' in os.environ:
+        node_offset = int(os.environ['TPU_NODE_OFFSET'])
+    self._node_offset = node_offset
 
   def master(self, *args, **kws):
     ip = super(TPUClusterResolver, self).master(*args, **kws)
@@ -227,7 +235,25 @@ class TPUClusterResolver(BaseTPUClusterResolver):
     r = dict()
     for k, v in spec.as_dict().items():
       r[k] = [reroute(ip, host=self._host) for ip in v]
-    return server_lib.ClusterSpec(r)
+    i = self._node_count or len(r['worker'])
+    j = self._node_offset or 0
+    r['worker'] = [r['worker'][0]] + r['worker'][(j+1):(j+1)+(i-1)]
+    spec2 = server_lib.ClusterSpec(r)
+    print(spec2.as_cluster_def())
+    return spec2
+
+def init_tpu_config(name, host=None, timeout_in_ms=600 * 60 * 1000):
+  cluster_resolver = TPUClusterResolver(name, host=host)
+  config = tf.ConfigProto(operation_timeout_in_ms=timeout_in_ms,
+                          graph_options=tf.GraphOptions(
+                            rewrite_options=rewriter_config_pb2.RewriterConfig(
+                              disable_meta_optimizer=True)),
+                          isolate_session_state=True)
+  cluster_spec = cluster_resolver.cluster_spec()
+  if cluster_spec:
+    config.cluster_def.CopyFrom(cluster_spec.as_cluster_def())
+  master = cluster_resolver.get_master()
+  return master, config
 
 def init_tpu(name, host=None, timeout_in_ms=600 * 60 * 1000):
   tpu_init = [tpu.initialize_system()]

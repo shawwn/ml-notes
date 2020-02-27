@@ -5,9 +5,10 @@ from tensorflow.python.ops import gradients
 
 def create_train_op(loss, params):
     lr = params["lr"]
+    global_step = tf.train.get_global_step()
+    assert global_step is not None
     if "warmup_steps" in params.keys():
-        lr = cosine_decay_with_warmup(tf.train.get_global_step(), lr,
-                                        params["max_steps"], warmup_steps=params["warmup_steps"])
+        lr = cosine_decay_with_warmup(global_step, lr, params["max_steps"], warmup_steps=params["warmup_steps"])
 
     if params["opt_name"] == "adam":
         if not "weight_decay" in params.keys():
@@ -59,7 +60,7 @@ def create_train_op(loss, params):
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS) # To update batchnorm, if present
     global_vars = [v for v in tf.global_variables()]
     all_vars = [v for v in tf.trainable_variables()]
-    only_train_transformer_layers = False
+    only_train_transformer_layers = False if 'only_train_transformer_layers' not in params else params['only_train_transformer_layers']
     def should_train_variable(v):
       if only_train_transformer_layers:
         if '/h' not in v.name and '/ln_f' not in v.name:
@@ -76,8 +77,8 @@ def create_train_op(loss, params):
     parameter_count = sum([np.prod(v.shape.as_list()) for v in train_vars])
     print("Using %d parameters (%.2fM)" % (parameter_count, parameter_count/(1024.0*1024.0)))
     #use_memory_saving_gradients=True
-    use_memory_saving_gradients=False
-    colocate_gradients_with_ops=True
+    use_memory_saving_gradients=False if 'memory_saving_gradients' not in params else params['memory_saving_gradients']
+    colocate_gradients_with_ops=True if 'colocate_gradients' not in params else params['colocate_gradients']
     gate_gradients=None
     if use_memory_saving_gradients:
       #grads = memory_saving_gradients.gradients(loss, train_vars, colocate_gradients_with_ops=colocate_gradients_with_ops, checkpoints='memory')
@@ -89,11 +90,9 @@ def create_train_op(loss, params):
       grads = gradients.gradients(loss, train_vars, colocate_gradients_with_ops=colocate_gradients_with_ops, gate_gradients=gate_gradients)
     grads = list(zip(grads, train_vars))
     grads = [(g, v) if g is not None else (tf.zeros_like(v), v) for g, v in grads]  # replace disconnected gradients with zeros
-    global_step = tf.train.get_global_step()
-    assert global_step is not None
     #train_op = optimizer.minimize(loss, global_step=global_step)
     train_op = optimizer.apply_gradients(grads, global_step=global_step)
-    train_op = tf.group([train_op, update_ops])
+    train_op = tf.group([train_op, update_ops], name="train_op")
 
     return train_op
 

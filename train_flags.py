@@ -49,6 +49,18 @@ flags.DEFINE_string(
     'restore_dir', default=None,
     help=('The directory where the model should be restored from'))
 
+flags.DEFINE_bool(
+    'restore_trainable_variables', default=False,
+    help=('Only restore trainable variables'))
+
+flags.DEFINE_string(
+    'params', default=None,
+    help=('The file to read model parameters from'))
+
+flags.DEFINE_string(
+    'dataset', default=None,
+    help=('The file to read examples from'))
+
 flags.DEFINE_integer(
     'resnet_depth', default=50,
     help=('Depth of ResNet model to use. Must be one of {18, 34, 50, 101, 152,'
