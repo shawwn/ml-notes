@@ -266,7 +266,7 @@ class TrainRunner(object):
       output_dir = os.path.join(FLAGS.model_dir, "eval")
       tf.gfile.MakeDirs(output_dir)
       # Summary writer writes out eval metrics.
-      summary_writer = tf.summary.FileWriter(output_dir)
+      summary_writer = tf.compat.v1.summary.FileWriter(output_dir)
 
     def checkpoint_thread_fn(saver, sess):
       saver.save(sess, FLAGS.model_dir + "/model.ckpt-%d" % (self.cur_step))
@@ -306,7 +306,6 @@ class TrainRunner(object):
       if output_summaries:
         tf.logging.info("TrainRunner: writing summaries...")
         with tf.Graph().as_default():
-          summaries = []
           eval_results = {'loss': loss}
           for metric in eval_results:
             values = eval_results[metric]
@@ -314,11 +313,16 @@ class TrainRunner(object):
               values = [values]
             for i, value in enumerate(values):
               tag = '{}_{:02d}'.format(metric, i) if i > 0 else metric
+              step = self.cur_step - len(values) + i + 1
+              summaries = []
               summaries.append(tf.Summary.Value(tag=tag, simple_value=value))
-            tf_summary = tf.Summary(value=list(summaries))
-            summary_writer.add_summary(tf_summary, self.cur_step)
-          tf.logging.info("TrainRunner: flushing summaries...")
-          summary_writer.flush()
+              tf_summary = tf.Summary(value=list(summaries))
+              summary_writer.add_summary(tf_summary, step)
+          tf.logging.info("TrainRunner: flushing summaries (%d)...", self.cur_step)
+          def thunk(cur_step):
+            summary_writer.flush()
+            tf.logging.info("TrainRunner: flushing summaries (%d) (done)", cur_step)
+          tflex.parallelize([self.cur_step], thunk)
       tf.logging.info(
           "TrainRunner: step {} global {} end {} loss {} step time {:.2f} sec {:.7f} examples/sec"
           .format(self.cur_step, gs, end_step, loss, end - start,
