@@ -229,7 +229,8 @@ class TrainRunner(object):
         outputs_from_all_shards=False,
     )
     initializer = tf.global_variables_initializer()
-    self.saver = tf.train.Saver()
+    var_list = tf.global_variables()
+    self.saver = tf.train.Saver(var_list=var_list)
     graph_io.write_graph(tf.Graph().as_graph_def(add_shapes=True),
                          FLAGS.model_dir, "graph.pbtxt")
 
