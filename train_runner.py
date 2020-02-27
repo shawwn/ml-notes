@@ -177,7 +177,8 @@ class TrainRunner(object):
 
     tf.logging.info("TrainRunner: initialize method")
 
-    tf.train.get_or_create_global_step()
+    with tf.device(self.device_for_host()):
+      self.global_step = tflex.get_or_create_global_step()
 
     def infeed_thread_fn():
       """Build and infeed session.run calls in a background thread."""
@@ -229,8 +230,7 @@ class TrainRunner(object):
         outputs_from_all_shards=False,
     )
     initializer = tf.global_variables_initializer()
-    var_list = tf.global_variables()
-    self.saver = tf.train.Saver(var_list=var_list)
+    self.saver = tf.train.Saver()
     graph_io.write_graph(tf.Graph().as_graph_def(add_shapes=True),
                          FLAGS.model_dir, "graph.pbtxt")
 
@@ -239,6 +239,14 @@ class TrainRunner(object):
         self.cluster_resolver.get_master(),
         config=self.config)
     self.sess.run(initializer)
+
+    if FLAGS.restore_dir is not None:
+      ckpt = tf.train.latest_checkpoint(FLAGS.restore_dir)
+      if ckpt is not None:
+        tf.logging.info('Restoring %s', ckpt)
+        self.saver.restore(self.sess, ckpt)
+        tf.logging.info('Restoring %s (done)', ckpt)
+    self.cur_step = self.sess.run(self.global_step)
 
     # Complete infeed graph generation and session.run calls
     self.infeed_thread = threading.Thread(target=infeed_thread_fn, daemon=True)
@@ -253,19 +261,20 @@ class TrainRunner(object):
     """
 
     def checkpoint_thread_fn(saver, sess):
-      saver.save(sess, FLAGS.model_dir + "/model.ckpt-%d" % (cur_step))
+      saver.save(sess, FLAGS.model_dir + "/model.ckpt-%d" % (self.cur_step))
 
-    cur_step = 0
     thread_id = 0
     checkpoint_threads = []
     need_final_checkpoint = False
-    tf.logging.info("TrainRunner: step %d", cur_step)
+    tf.logging.info("TrainRunner: step %d", self.cur_step)
+    #sess.run(self.global_step.initializer, dict([(self.global_step.initializer.inputs[1], self.cur_step)]))
     for i in range(num_threads):
       checkpoint_threads.append(None)
-    while cur_step < self.train_steps:
+    end_step = self.cur_step + self.train_steps
+    while self.cur_step < end_step:
       start = time.time()
       tf.logging.info("TrainRunner: start next %d steps", self.iterations)
-      cur_step += self.iterations
+      self.cur_step += self.iterations
       loss = self.sess.run([self.loss])
       thread = checkpoint_threads[thread_id]
       if checkpoint_threads[thread_id] is not None and checkpoint_threads[thread_id].is_alive():
@@ -283,9 +292,11 @@ class TrainRunner(object):
       if thread_id >= num_threads:
         thread_id = 0
       end = time.time()
+      tf.logging.info("TrainRunner: fetching global_step...")
+      gs = self.sess.run(self.global_step)
       tf.logging.info(
-          "TrainRunner: step {} loss {} step time {} sec {} examples/sec"
-          .format(cur_step, loss, end - start,
+          "TrainRunner: step {} global {} end {} loss {} step time {:.2f} sec {:.7f} examples/sec"
+          .format(self.cur_step, gs, end_step, loss, end - start,
                   self.iterations * FLAGS.train_batch_size / (end - start)))
     if need_final_checkpoint:
       tf.logging.info("TrainRunner: starting final checkpoint thread...")

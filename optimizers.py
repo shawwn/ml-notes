@@ -89,8 +89,10 @@ def create_train_op(loss, params):
       grads = gradients.gradients(loss, train_vars, colocate_gradients_with_ops=colocate_gradients_with_ops, gate_gradients=gate_gradients)
     grads = list(zip(grads, train_vars))
     grads = [(g, v) if g is not None else (tf.zeros_like(v), v) for g, v in grads]  # replace disconnected gradients with zeros
-    #train_op = optimizer.minimize(loss, global_step=tf.train.get_global_step())
-    train_op = optimizer.apply_gradients(grads)
+    global_step = tf.train.get_global_step()
+    assert global_step is not None
+    #train_op = optimizer.minimize(loss, global_step=global_step)
+    train_op = optimizer.apply_gradients(grads, global_step=global_step)
     train_op = tf.group([train_op, update_ops])
 
     return train_op

@@ -13,8 +13,12 @@ import time
 import threading
 
 from tensorflow.python.framework import dtypes
+from tensorflow.python.framework import ops
 from tensorflow.python.distribute.cluster_resolver import TPUClusterResolver as BaseTPUClusterResolver
 from tensorflow.python.training import server_lib
+from tensorflow.python.ops import init_ops
+from tensorflow.python.ops import variable_scope
+from tensorflow.python.ops import variables
 from tensorflow.core.protobuf import rewriter_config_pb2
 from tensorflow.contrib import tpu
 
@@ -976,3 +980,81 @@ def device(name=''):
   if 'cpu' in name:
     return tf.device(name)
   return nullcontext()
+
+def get_global_step(graph=None):
+  """Get the global step tensor.
+
+  The global step tensor must be an integer variable. We first try to find it
+  in the collection `GLOBAL_STEP`, or by name `global_step:0`.
+
+  Args:
+    graph: The graph to find the global step in. If missing, use default graph.
+
+  Returns:
+    The global step variable, or `None` if none was found.
+
+  Raises:
+    TypeError: If the global step tensor has a non-integer type, or if it is not
+      a `Variable`.
+  """
+  graph = graph or ops.get_default_graph()
+  global_step_tensor = None
+  global_step_tensors = graph.get_collection(ops.GraphKeys.GLOBAL_STEP)
+  if len(global_step_tensors) == 1:
+    global_step_tensor = global_step_tensors[0]
+  elif not global_step_tensors:
+    try:
+      global_step_tensor = graph.get_tensor_by_name('global_step:0')
+    except KeyError:
+      return None
+  else:
+    logging.error('Multiple tensors in global_step collection.')
+    return None
+
+  assert_global_step(global_step_tensor)
+  return global_step_tensor
+
+def create_global_step(graph=None):
+  """Create global step tensor in graph.
+
+  Args:
+    graph: The graph in which to create the global step tensor. If missing, use
+      default graph.
+
+  Returns:
+    Global step tensor.
+
+  Raises:
+    ValueError: if global step tensor is already defined.
+  """
+  graph = graph or ops.get_default_graph()
+  if get_global_step(graph) is not None:
+    raise ValueError('"global_step" already exists.')
+  # Create in proper graph and base name_scope.
+  with graph.as_default() as g, g.name_scope(None):
+    return variable_scope.get_variable(
+        ops.GraphKeys.GLOBAL_STEP,
+        shape=[],
+        dtype=dtypes.int64,
+        initializer=init_ops.zeros_initializer(),
+        trainable=False,
+        use_resource=True,
+        aggregation=variables.VariableAggregation.ONLY_FIRST_REPLICA,
+        collections=[ops.GraphKeys.GLOBAL_VARIABLES, ops.GraphKeys.GLOBAL_STEP])
+
+def get_or_create_global_step(graph=None):
+  """Returns and create (if necessary) the global step tensor.
+
+  Args:
+    graph: The graph in which to create the global step tensor. If missing, use
+      default graph.
+
+  Returns:
+    The global step tensor.
+  """
+  graph = graph or ops.get_default_graph()
+  global_step_tensor = get_global_step(graph)
+  if global_step_tensor is None:
+    global_step_tensor = create_global_step(graph)
+  return global_step_tensor
+

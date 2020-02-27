@@ -45,6 +45,10 @@ flags.DEFINE_string(
     help=('The directory where the model and training/evaluation summaries are'
           ' stored.'))
 
+flags.DEFINE_string(
+    'restore_dir', default=None,
+    help=('The directory where the model should be restored from'))
+
 flags.DEFINE_integer(
     'resnet_depth', default=50,
     help=('Depth of ResNet model to use. Must be one of {18, 34, 50, 101, 152,'
