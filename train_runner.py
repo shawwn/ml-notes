@@ -21,6 +21,7 @@ from __future__ import print_function
 import math
 import threading
 import time
+import os
 
 from absl import flags
 import tensorflow as tf
@@ -252,13 +253,18 @@ class TrainRunner(object):
     self.infeed_thread = threading.Thread(target=infeed_thread_fn, daemon=True)
     self.infeed_thread.start()
 
-  def train(self, num_threads=1):
+  def train(self, num_threads=1, output_summaries=True):
     """Run the Train steps on the TPU device.
 
     Args:
       num_threads: number of outstanding checkpointing threads
 
     """
+    if output_summaries:
+      output_dir = os.path.join(FLAGS.model_dir, "eval")
+      tf.gfile.MakeDirs(output_dir)
+      # Summary writer writes out eval metrics.
+      summary_writer = tf.summary.FileWriter(output_dir)
 
     def checkpoint_thread_fn(saver, sess):
       saver.save(sess, FLAGS.model_dir + "/model.ckpt-%d" % (self.cur_step))
@@ -294,6 +300,23 @@ class TrainRunner(object):
       end = time.time()
       tf.logging.info("TrainRunner: fetching global_step...")
       gs = self.sess.run(self.global_step)
+      # Write out summary to tensorboard.
+      if output_summaries:
+        tf.logging.info("TrainRunner: writing summaries...")
+        with tf.Graph().as_default():
+          summaries = []
+          eval_results = {'loss': loss}
+          for metric in eval_results:
+            values = eval_results[metric]
+            if not isinstance(values, list):
+              values = [values]
+            for i, value in enumerate(values):
+              tag = '{}_{:02d}'.format(metric, i) if i > 0 else metric
+              summaries.append(tf.Summary.Value(tag=tag, simple_value=value))
+            tf_summary = tf.Summary(value=list(summaries))
+            summary_writer.add_summary(tf_summary, self.cur_step)
+          tf.logging.info("TrainRunner: flushing summaries...")
+          summary_writer.flush()
       tf.logging.info(
           "TrainRunner: step {} global {} end {} loss {} step time {:.2f} sec {:.7f} examples/sec"
           .format(self.cur_step, gs, end_step, loss, end - start,
@@ -313,6 +336,10 @@ class TrainRunner(object):
         checkpoint_threads[i].join()
         checkpoint_threads[i] = None
     tf.logging.info("TrainRunner: waiting for checkpoint threads (done)")
+    if output_summaries:
+      tf.logging.info("TrainRunner: closing summary writer...")
+      summary_writer.close()
+      tf.logging.info("TrainRunner: closing summary writer (done)")
 
   def shutdown(self):
     tf.logging.info("TrainRunner: shutting down...")
