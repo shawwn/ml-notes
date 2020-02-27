@@ -61,6 +61,10 @@ flags.DEFINE_string(
     'dataset', default=None,
     help=('The file to read examples from'))
 
+flags.DEFINE_string(
+    'export_dataset', default=None,
+    help=('Export the dataset as a .tfrecord file'))
+
 flags.DEFINE_integer(
     'resnet_depth', default=50,
     help=('Depth of ResNet model to use. Must be one of {18, 34, 50, 101, 152,'
