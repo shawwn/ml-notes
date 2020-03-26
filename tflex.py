@@ -255,7 +255,7 @@ class TPUClusterResolver(BaseTPUClusterResolver):
     print(spec2.as_cluster_def())
     return spec2
 
-def init_tpu_config(name, host=None, timeout_in_ms=600 * 60 * 1000):
+def init_tpu_config(name, host=None, timeout_in_ms=5 * 60 * 1000):
   cluster_resolver = TPUClusterResolver(name, host=host)
   config = tf.ConfigProto(operation_timeout_in_ms=timeout_in_ms,
                           graph_options=tf.GraphOptions(
@@ -268,9 +268,46 @@ def init_tpu_config(name, host=None, timeout_in_ms=600 * 60 * 1000):
   master = cluster_resolver.get_master()
   return master, config
 
-def init_tpu(name, host=None, timeout_in_ms=600 * 60 * 1000, interactive=False):
-  tpu_init = [tpu.initialize_system()]
+class CountingSessionCreator(object):
+  """A creator that counts the number of created sessions."""
+
+  def __init__(self):
+    self._create_session_calls = 0
+
+  @property
+  def number_of_sessions_created(self):
+    return self._create_session_calls
+
+  def create_session(self):
+    self._create_session_calls += 1
+    return self.creator()
+
+
+class TPUSessionCreator(CountingSessionCreator):
+  """A creator that counts the number of created sessions."""
+
+  def __init__(self, *args, **kws):
+    super(TPUSessionCreator, self).__init__()
+    self._args = args
+    self._kws = kws
+
+  def creator(self):
+    sess, resolver = init_tpu(*self._args, **self._kws)
+    sess._tflex_resolver = resolver
+    return sess
+
+from tensorflow.python.training import monitored_session
+
+class TPUSession(monitored_session._RecoverableSession):
+  def __init__(self, name, host=None, timeout_in_ms=5 * 60 * 1000, interactive=False, graph=None, initialize=True):
+    super(TPUSession, self).__init__(TPUSessionCreator(name=name, host=host, timeout_in_ms=timeout_in_ms, interactive=interactive, graph=graph, initialize=initialize))
+
+  def list_devices(self):
+    return self._sess.list_devices()
+
+def init_tpu(name, host=None, timeout_in_ms=5 * 60 * 1000, interactive=False, graph=None, initialize=True):
   cluster_resolver = TPUClusterResolver(name, host=host)
+  graph = get_graph(graph)
   config = tf.ConfigProto(operation_timeout_in_ms=timeout_in_ms,
                           graph_options=tf.GraphOptions(
                             rewrite_options=rewriter_config_pb2.RewriterConfig(
@@ -279,9 +316,20 @@ def init_tpu(name, host=None, timeout_in_ms=600 * 60 * 1000, interactive=False):
   cluster_spec = cluster_resolver.cluster_spec()
   if cluster_spec:
     config.cluster_def.CopyFrom(cluster_spec.as_cluster_def())
-  init_sess = (tf.InteractiveSession if interactive else tf.Session)(cluster_resolver.get_master(), config=config)
-  init_sess.run(tpu_init)
+  init_sess = (tf.InteractiveSession if interactive else tf.Session)(cluster_resolver.get_master(), config=config, graph=graph)
+  if initialize:
+    with graph.as_default():
+      with absolute_name_scope('tflex'):
+        tpu_init = [op for op in get_graph().get_operations() if op.name == 'ConfigureDistributedTPU']
+        if len(tpu_init) <= 0:
+          tpu_init = [tpu.initialize_system()]
+    init_sess.run(tpu_init)
   return init_sess, cluster_resolver
+
+def get_graph(graph=None):
+  if graph is None:
+    graph = get_default_graph()
+  return graph
 
 def get_session(session=None):
   if session is None:
