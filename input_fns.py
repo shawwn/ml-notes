@@ -139,6 +139,7 @@ def make_source_tokens(index, num_hosts, n_vocab):
       tokens = [(_ + 0) % n_vocab for _ in range(0, 100000)]
     tf.logging.info("Dataset has %d tokens", len(tokens))
     _loaded_dataset = tokens
+  print("Broadcasting %d tokens to TPU host %d out of %d..." % (len(tokens), index, num_hosts))
   t = tf.broadcast_to(tokens, [len(tokens)])
   dset = tf.data.Dataset.from_tensors(t);
   return dset
