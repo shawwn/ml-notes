@@ -75,10 +75,18 @@ def ensure_default(name, value):
     return value
 
 def get_default_session(required=False):
-  return get_default('session', required=required)
+  result = get_default('session', required=required)
+  if result is None:
+    result = tf.get_default_session()
+  assert result is not None
+  return result
 
 def get_default_graph(required=False):
-  return get_default('graph', required=required)
+  result = get_default('graph', required=required)
+  if result is None:
+    result = tf.get_default_graph()
+  assert result is not None
+  return result
 
 class Future(object):
   def __init__(self, dependencies, thunk, *args, **kws):
