@@ -139,9 +139,20 @@ def make_source_tokens(index, num_hosts, n_vocab):
       tokens = [(_ + 0) % n_vocab for _ in range(0, 100000)]
     tf.logging.info("Dataset has %d tokens", len(tokens))
     _loaded_dataset = tokens
-  print("Broadcasting %d tokens to TPU host %d out of %d..." % (len(tokens), index, num_hosts))
-  t = tf.broadcast_to(tf.cast(tokens, tf.int32), [len(tokens)])
+  n = len(tokens)
+  k = n // num_hosts
+  i = index * k
+  j = (index + 1) * k
+  tokens = tokens[i:j]
+  tf.logging.info("Shard %d/%d has %d tokens", index, num_hosts, len(tokens))
+  t = tf.broadcast_to(tokens, [len(tokens)])
   dset = tf.data.Dataset.from_tensors(t);
+  if _loaded_dataset:
+    if index >= num_hosts - 1:
+      tf.logging.info('Resetting tokens')
+      while len(_loaded_dataset) > 0:
+        _loaded_dataset.pop()
+      _loaded_dataset = None
   return dset
 
 def bpe_text(batch_size, files, iterations, stitch, amount=1024, batch=True):
