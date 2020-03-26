@@ -21,6 +21,12 @@ from tensorflow.python.ops import variable_scope
 from tensorflow.python.ops import variables
 from tensorflow.core.protobuf import rewriter_config_pb2
 from tensorflow.contrib import tpu
+import importlib
+
+def reload():
+  os.system("git pull")
+  module = importlib.import_module("tflex")
+  importlib.reload(module)
 
 class _DefaultState(threading.local):
   def __init__(self, **kws):
