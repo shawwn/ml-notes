@@ -202,8 +202,7 @@ def reroute(addr, host=None):
   if a == 10 and b in [48, 49]:
     assert (d == 2)
     port = b * 1000 + c
-  elif a == 10 and b in range(50, 60):
-    assert (c == 0)
+  elif a == 10 and b in range(2, 66) and c == 0:
     port = b * 1000 + d
   else:
     return addr
