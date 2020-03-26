@@ -113,7 +113,7 @@ _loaded_dataset = None
 
 def make_source_tokens(index, num_hosts, n_vocab):
   global _loaded_dataset
-  if _loaded_dataset:
+  if _loaded_dataset is not None:
     tokens = _loaded_dataset
   else:
     #tokens = [(_ + 0) for _ in range(0, n_ctx+1)]
@@ -147,11 +147,13 @@ def make_source_tokens(index, num_hosts, n_vocab):
   tf.logging.info("Shard %d/%d has %d tokens", index, num_hosts, len(tokens))
   t = tf.broadcast_to(tokens, [len(tokens)])
   dset = tf.data.Dataset.from_tensors(t);
-  if _loaded_dataset:
+  if _loaded_dataset is not None:
     if index >= num_hosts - 1:
       tf.logging.info('Resetting tokens')
-      while len(_loaded_dataset) > 0:
-        _loaded_dataset.pop()
+      if not isinstance(_loaded_dataset, np.ndarray):
+        if isinstance(_loaded_dataset, list):
+          while len(_loaded_dataset) > 0:
+            _loaded_dataset.pop()
       _loaded_dataset = None
   return dset
 
