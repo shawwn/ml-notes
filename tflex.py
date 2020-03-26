@@ -1090,3 +1090,22 @@ def get_or_create_global_step(graph=None):
     global_step_tensor = create_global_step(graph)
   return global_step_tensor
 
+def create_var_with_large_initial_value(initial_value: np.ndarray, *args, **kwargs):
+    assert isinstance(initial_value, np.ndarray)
+    var = tf.Variable(initial_value, *args, **kwargs)
+    return var.initialized_value()
+
+def create_var_with_large_initial_value2(initial_value: np.ndarray, *args, **kwargs):
+    """Create tf.Variable with large initial value without bloating the tf graph."""
+    assert isinstance(initial_value, np.ndarray)
+    zeros = tf.zeros(initial_value.shape, initial_value.dtype)
+    var = tf.Variable(zeros, *args, **kwargs)
+    return var, tf.assign(var, initial_value)
+
+def create_var_with_large_initial_value3(initial_value: np.ndarray, *args, **kwargs):
+    """Create tf.Variable with large initial value without bloating the tf graph."""
+    assert isinstance(initial_value, np.ndarray)
+    var, finalize = create_var_with_large_initial_value2(initial_value, *args, **kwargs)
+    with tf.control_dependencies([finalize]):
+      return tf.identity(var)
+
