@@ -1019,9 +1019,6 @@ def cpu(index, session=None):
 def gpu(index, session=None):
   return dev("/gpu:%d" % index, session=session)
 
-def tpu(index, session=None):
-  return dev("/tpu:%d" % index, session=session)
-
 def device(name='', session=None):
   session = get_session(session)
   if has_override_device(session=session):
