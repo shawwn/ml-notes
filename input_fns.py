@@ -55,7 +55,7 @@ class TFRecordExporter:
             tfr_file = self.tfr_prefix + '.tfrecords'
             self.tfr_writers.append(tf.python_io.TFRecordWriter(tfr_file, tfr_opt))
         for lod, tfr_writer in enumerate(self.tfr_writers):
-            import pdb; pdb.set_trace()
+            #import pdb; pdb.set_trace()
             data = np.array(tokens, dtype=np.int32)
             feature = {
                 #"hash": _bytes_feature(hash.encode()),
@@ -140,7 +140,7 @@ def make_source_tokens(index, num_hosts, n_vocab):
     tf.logging.info("Dataset has %d tokens", len(tokens))
     _loaded_dataset = tokens
   print("Broadcasting %d tokens to TPU host %d out of %d..." % (len(tokens), index, num_hosts))
-  t = tf.broadcast_to(tokens, [len(tokens)])
+  t = tf.broadcast_to(tf.cast(tokens, tf.int32), [len(tokens)])
   dset = tf.data.Dataset.from_tensors(t);
   return dset
 
@@ -220,7 +220,7 @@ def gpt2_input(params):
       num_hosts = 1
   if False:
     dset = make_source_dataset(current_host, num_hosts, batch_size, n_ctx=params['n_ctx'])
-  elif FLAGS.dataset is not None and FLAGS.dataset.startswith('gs://'):
+  elif FLAGS.dataset is not None and FLAGS.dataset.startswith('gs://') and '*' in FLAGS.dataset:
     files = []
     for fname in FLAGS.dataset.split(','):
       files.extend(sorted(tf.io.gfile.glob(fname)))

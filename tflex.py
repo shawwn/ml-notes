@@ -21,7 +21,14 @@ from tensorflow.python.ops import variable_scope
 from tensorflow.python.ops import variables
 from tensorflow.core.protobuf import rewriter_config_pb2
 from tensorflow.contrib import tpu
+from tensorflow.contrib.tpu.python.tpu import tpu_function
 import importlib
+
+from pprint import pprint as pp
+
+def prn(x):
+  pp(x);
+  return x
 
 def reload():
   os.system("git pull")
@@ -84,7 +91,7 @@ def get_default_session(required=False):
   result = get_default('session', required=required)
   if result is None:
     result = tf.get_default_session()
-  assert result is not None
+  #assert result is not None
   return result
 
 def get_default_graph(required=False):
@@ -1050,7 +1057,16 @@ def get_override_cores(session=None):
   if hasattr(session, '_override_cores'):
     return session._override_cores
 
-def device_for_tpu_core(task=0, core=0, job_name="tpu_worker"):
+# returns either 'worker' or 'tpu_worker'
+# (this function is to work around some tensorflow oddities on
+# different versions)
+def get_job_name(session=None):
+  result = [x for x in get_cpus(session=session)[0].name.lstrip('/').split('/') if x.startswith('job:')][0].split(':')[1]
+  return result
+
+def device_for_tpu_core(task=0, core=0, job_name=None, session=None):
+  if job_name is None:
+    job_name = get_job_name(session=session)
   return "/job:%s/task:%d/device:TPU_REPLICATED_CORE:%d" % (job_name, task, core)
 
 def device_name(name, session=None):
@@ -1133,7 +1149,7 @@ def get_global_step(graph=None):
     logging.error('Multiple tensors in global_step collection.')
     return None
 
-  assert_global_step(global_step_tensor)
+  #assert_global_step(global_step_tensor)
   return global_step_tensor
 
 def create_global_step(graph=None):
@@ -1217,13 +1233,36 @@ def run(*args, **kws):
   session = get_session(session)
   return session.run(*args, options=options, **kws)
 
-def num_cores():
-  return len(get_cores()
+def num_cores(session=None):
+  return len(get_cores(session=session))
+
+def all_equal(l):
+  prev = None
+  for i, x in enumerate(l):
+    if i > 0 and prev != x:
+      return False
+    prev = x
+  return True
+
+def flatten(l):
+  r = []
+  for i in range(len(l)):
+    x = l[i]
+    for j in range(len(x)):
+      y = x[j]
+      r.append(y)
+  return r
 
 def tpu_parallel(f, inputs=[], session=None):
   session = get_session(session)
   assert has_tpu(session=session)
-  (results,) = tpu.shard(f, inputs=inputs, num_shards=num_cores(session=session), outputs_from_all_shards=True)
+  num_shards = num_cores(session=session)
+  if callable(inputs):
+    inputs = prn([inputs(i) for i in range(num_shards)])
+    assert all_equal([len(x) for x in inputs])
+    inputs = [flatten(inputs)]
+    #inputs = [np.hstack(inputs)]
+  (results,) = tpu.shard(f, inputs=inputs, num_shards=num_shards, outputs_from_all_shards=True)
   return results
 
 # ----------- misc --------------------
@@ -1260,3 +1299,222 @@ class FakeHook(session_run_hook.SessionRunHook):
   def end(self, session):
     self.call_counter['end'] += 1
 
+
+def get_variable(name, var_list=None):
+  name = os.path.join(tf.get_variable_scope().name, name)
+  if var_list is None:
+    var_list = tf.global_variables()
+  for x in var_list:
+    if x.name.startswith(name + ':'):
+      return x
+
+def create_variable(name, value, **kws):
+  use_resource = kws.pop('use_resource') if 'use_resource' in kws else True
+  return tf.Variable(value, name=name, use_resource=use_resource, **kws)
+
+def get_or_create_variable(name, value, **kws):
+  v = get_variable(name)
+  if v is None:
+    v = create_variable(name, value, **kws)
+  return v
+
+def create_untrainable_variable(name, value, **kws):
+  return create_variable(name, value, trainable=False, **kws)
+
+def get_or_create_untrainable_variable(name, value, **kws):
+  return get_or_create_variable(name, value, trainable=False, **kws)
+
+# Sample 1024(+1) tokens from the stitched together text
+def sample_text(x, amount):
+  s = tf.size(x)
+  r = tf.random.uniform([], maxval=s-(amount+1), dtype=tf.dtypes.int32)
+  r1 = tf.range(r, r+amount)
+  r2 = tf.range(r+1, (r+1)+amount)
+  r1 = tf.reshape(r1, [amount]) # Somehow, this makes the compiler happy
+  r2 = tf.reshape(r2, [amount]) # TPUs want constant sized input, and these reshapes makes it recognize the shape of the input
+  vals1 = tf.gather(x, r1)
+  vals2 = tf.gather(x, r2)
+  features, labels = vals1, vals2
+  return features, labels
+
+def read_bucket(path, mode='rb'):
+  if os.path.isfile(path):
+    with open(path, mode) as f:
+      return f.read()
+  else:
+    import tensorflow as tf
+    with tf.io.gfile.GFile(path, mode=mode) as f:
+      return f.read()
+
+import tempfile
+from contextlib import contextmanager
+
+@contextmanager
+def bucket_file(path):
+  if os.path.isfile(path):
+    with open(path, "rb") as f:
+      data = f.read()
+    yield path, data
+  else:
+    data = read_bucket(path)
+    with tempfile.NamedTemporaryFile() as tmp:
+      tmp.write(data)
+      tmp.seek(0)
+      yield tmp.name, data
+
+def bucket_path(path, *parts):
+  if len(parts) <= 0:
+    return path
+  if path.startswith('gs://'):
+    sep = '/'
+  else:
+    sep = os.sep
+  if not path.endswith(sep):
+    path = path + sep
+  path = path + parts[0]
+  return bucket_path(path, *parts[1:])
+
+def make_tokens(tokens=None):
+  if isinstance(tokens, str):
+    path = tokens
+    data = read_bucket(path)
+    tokens = np.frombuffer(data, dtype=np.uint16)
+    tf.logging.info("Loaded %d tokens from %s", len(tokens), path)
+  if tokens is None:
+    tokens = np.array([_ for _ in range(2048)], dtype=np.uint16)
+  if isinstance(tokens, tf.Tensor):
+    return tokens
+  with cpu(0):
+    #tokens = get_or_create_untrainable_variable("tokens", lambda: tokens, dtype=tf.int32)
+    tokens = create_untrainable_variable("tokens", lambda: tokens, dtype=tf.int32)
+  return tf.identity(tokens.initialized_value(), name="read_tokens")
+
+def get_tpu_step(model_fn, params, tokens=None):
+  gs = get_or_create_global_step()
+  def input_fn(host_index):
+    toks = make_tokens(tokens=tokens)
+    features, labels = sample_text(toks, 1024);
+    return features, labels
+  def tpu_step(x):
+    features, labels = x[0], x[1]
+    features = tf.reshape(tf.cast(features, tf.int32), [1, -1])
+    labels = tf.reshape(tf.cast(labels, tf.int32), [1, -1])
+    with tf.variable_scope(tf.get_variable_scope().name, reuse=tf.AUTO_REUSE):
+      estimator_spec = model_fn(features, labels, tf.estimator.ModeKeys.TRAIN, params);
+    with tf.control_dependencies([estimator_spec.train_op]):
+      return tf.identity(estimator_spec.loss, name="tpu_loss_op")
+  def predict_tpu_step(x):
+    pparams = dict(params)
+    features, labels = x[0], None
+    pparams['text_len'] = tf.size(features)
+    pparams['length'] = 32
+    features = tf.reshape(tf.cast(features, tf.int32), [1, -1])
+    with tf.variable_scope(tf.get_variable_scope().name, reuse=tf.AUTO_REUSE):
+      estimator_spec = model_fn(features, labels, tf.estimator.ModeKeys.PREDICT, pparams);
+    #return tf.identity(estimator_spec.predictions['tokens'], name="tpu_predict_op")
+    #return estimator_spec.predictions['tokens']
+    return tf.constant([42], dtype=tf.int32)
+  @tpu_function.on_device_training_loop
+  def tpu_loop():
+    return wrap_computation_in_while_loop(tpu_step, params['iterations'])
+  train_op = tpu_parallel(tpu_step, inputs=input_fn)
+  #train_op = tpu_parallel(tpu_loop, inputs=input_fn)
+  predict_op = tpu_parallel(predict_tpu_step, inputs=input_fn)
+  #return tpu_step, input_fn
+  return train_op, predict_op
+
+def restore(ckpt=None, session=None, var_list=None):
+  session = get_session(session)
+  if ckpt is None:
+    ckpt = 'gs://danbooru-euw4a/models/117M/model.ckpt'
+  if var_list is None:
+    var_list = tf.trainable_variables()
+  saver = tf.train.Saver(var_list=prn(var_list));
+  saver.restore(session, ckpt)
+  return var_list
+
+def timeit(f, verbose=True):
+  start = time.time();
+  result = f();
+  dt = (time.time() - start);
+  if verbose:
+    print('%.2fsec' % dt);
+  return result, dt
+
+
+def wrap_computation_in_while_loop_vanilla(op_fn, n, parallel_iterations=1):
+  """Wraps the ops generated by `op_fn` in tf.while_loop."""
+
+  def computation(i):
+    ops = op_fn()
+    if not isinstance(ops, list):
+      ops = [ops]
+    with tf.control_dependencies(ops):
+      return i + 1
+
+  return tf.while_loop(
+      lambda i: tf.less(i, n),
+      computation, [tf.constant(0)],
+      parallel_iterations=parallel_iterations)
+
+
+
+def wrap_computation_in_while_loop(op_fn, n, parallel_iterations=1, as_callable=False):
+  """Wraps the ops generated by `op_fn` in tf.while_loop."""
+
+  def computation(i):
+    ops = op_fn()
+    if not isinstance(ops, list):
+      ops = [ops]
+    with tf.control_dependencies(ops):
+      return i + 1
+
+  def step():
+    if as_callable:
+      return op_fn()
+    else:
+      return op_fn
+
+  def cond(*args):
+      return True
+
+  def body(i, output):
+    loss = step()
+    with tf.control_dependencies([loss]):
+      pp(loss)
+      pp(output)
+      #res = tf.stack([output[0], loss], axis=0)
+      res = tf.concat([output, [loss]], axis=0)
+      pp(res)
+      #return [
+      #    #tf.concat([output, loss], axis=1)
+      #    output
+      #]
+      return [
+          i + 1,
+          res
+      ]
+
+  return tf.while_loop(
+      #lambda i: tf.less(i, n),
+      cond,
+      body,
+      maximum_iterations=n,
+      loop_vars=[
+          #context_output['presents'],
+          #context[:, -1],
+          #context,
+        #tf.constant([], dtype=tf.float32)
+       tf.constant(0),
+       tf.constant([[0.0] * 8], dtype=tf.float32)
+      ],
+      shape_invariants=[
+          #tf.TensorShape(gpt2.past_shape(params=params, batch_size=batch_size)),
+          tf.TensorShape(None),
+          tf.TensorShape([None, 8]),
+          #tf.TensorShape([None, None]),
+      ],
+      back_prop=False,
+      parallel_iterations=parallel_iterations)
+
+  

@@ -1,7 +1,11 @@
 import tensorflow as tf
+from models.gpt2 import gpt2
+from optimizers import create_train_op
+from metric_fns import perplexity_metric
+from models.gpt2 import sample
 
 def gpt2_model(features, labels, mode, params):
-    import gpt2
+    #import gpt2
 
     if mode == tf.estimator.ModeKeys.TRAIN or mode == tf.estimator.ModeKeys.EVAL:
         if params["precision"] == 'bfloat16':
@@ -23,7 +27,7 @@ def gpt2_model(features, labels, mode, params):
         loss = tf.reduce_mean(loss_batch)
 
     if mode == tf.estimator.ModeKeys.TRAIN:
-        from optimizers import create_train_op
+        #from optimizers import create_train_op
         train_op = create_train_op(loss, params)
 
         if params["use_tpu"]:
@@ -33,7 +37,7 @@ def gpt2_model(features, labels, mode, params):
 
 
     if mode == tf.estimator.ModeKeys.EVAL:
-        from metric_fns import perplexity_metric
+        #from metric_fns import perplexity_metric
 
         if params["use_tpu"]:
             # Metric inputs are transferred to CPU and must preserve batch dimension
@@ -45,13 +49,13 @@ def gpt2_model(features, labels, mode, params):
 
 
     if mode == tf.estimator.ModeKeys.PREDICT:
-        from models.gpt2 import sample
+        #from models.gpt2 import sample
 
         if not "top_k" in params.keys():
             params["top_k"] = 0
 
         output = sample.sample_sequence(
-            params=params, length=params["n_ctx"],
+            params=params, length=min(params['length'] - params['text_len'], params["n_ctx"]),
             context=features,
             batch_size=params["batch_size"],
             temperature=1.0, top_k=params["top_k"]
