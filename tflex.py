@@ -255,12 +255,12 @@ class TPUClusterResolver(BaseTPUClusterResolver):
     print(spec2.as_cluster_def())
     return spec2
 
-if not hasattr(tflex.state, 'timeout_in_ms'):
-  tflex.state.timeout_in_ms = 5 * 60 * 1000 # no TPU operation should last more than 5 minutes
+if not hasattr(state, 'timeout_in_ms'):
+  state.timeout_in_ms = 5 * 60 * 1000 # no TPU operation should last more than 5 minutes
 
 def get_session_timeout_in_ms(timeout_in_ms=None):
   if timeout_in_ms is None:
-    timeout_in_ms = tflex.state.timeout_in_ms
+    timeout_in_ms = state.timeout_in_ms
   return timeout_in_ms
 
 def init_tpu_config(name, host=None, timeout_in_ms=None):
