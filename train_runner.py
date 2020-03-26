@@ -253,7 +253,7 @@ class TrainRunner(object):
         outputs_from_all_shards=False,
     )
     initializer = tf.global_variables_initializer()
-    self.saver = tf.train.Saver()
+    self.saver = tf.train.Saver(keep_checkpoint_every_n_hours=0.5)
     graph_io.write_graph(tf.Graph().as_graph_def(add_shapes=True),
                          FLAGS.model_dir, "graph.pbtxt")
 
