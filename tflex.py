@@ -1206,7 +1206,14 @@ def absolute_variable_scope(scope, **kwargs):
     return tf.variable_scope(tf.VariableScope(name=scope, **kwargs), auxiliary_name_scope=False)
 
 def run(*args, **kws):
+  if 'timeout' in kws:
+    assert 'options' not in kws
+    timeout = kws.pop('timeout')
+    timeout_in_ms = int(timeout * 1000.0)
+    options = config_pb2.RunOptions(timeout_in_ms=timeout_in_ms)
+  else:
+    options = kws.pop('options') if 'options' in kws else None
   session = kws.pop('session') if 'session' in kws else None
   session = get_session(session)
-  return session.run(*args, **kws)
+  return session.run(*args, options=options, **kws)
 
