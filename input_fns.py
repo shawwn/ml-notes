@@ -145,7 +145,7 @@ def make_source_tokens(index, num_hosts, n_vocab):
   j = (index + 1) * k
   tokens = tokens[i:j]
   tf.logging.info("Shard %d/%d has %d tokens", index, num_hosts, len(tokens))
-  t = tf.broadcast_to(tokens, [len(tokens)])
+  t = tf.broadcast_to(tf.cast(tokens, tf.int32), [len(tokens)])
   dset = tf.data.Dataset.from_tensors(t);
   if _loaded_dataset is not None:
     if index >= num_hosts - 1:
