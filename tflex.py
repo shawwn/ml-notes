@@ -274,12 +274,17 @@ def get_session(session=None):
     session = get_default_session()
   return session
 
+from natsort import natsorted
+
+def sort_devices(devices):
+  return list(natsorted(devices, key=lambda x: x.name))
+
 def get_devices(session=None):
   session = get_session(session)
   if hasattr(session, '_cached_devices'):
     devices = session._cached_devices
   else:
-    devices = session._cached_devices = session.list_devices()
+    devices = session._cached_devices = sort_devices(session.list_devices())
   return devices
 
 def has_gpu(session=None):
@@ -306,6 +311,7 @@ def get_cores_from_devices(devices):
     cores = [x for x in devices if ':GPU:' in x.name]
   if len(cores) <= 0:
     cores = [x for x in devices if ':CPU:' in x.name]
+  #return sort_devices(cores) # TODO: assert sorted order
   return cores
 
 def get_cores(session=None, devices=None):
@@ -981,26 +987,27 @@ def get_override_cores(session=None):
 def device_for_tpu_core(task=0, core=0, job_name="tpu_worker"):
   return "/job:%s/task:%d/device:TPU_REPLICATED_CORE:%d" % (job_name, task, core)
 
-def device(name=''):
-  if has_override_device():
+def device(name='', session=None):
+  session = get_session(session)
+  if has_override_device(session=session):
     return nullcontext()
-  if has_override_cores():
+  if has_override_cores(session=session):
     if name is None:
       return tf.device(name)
     if name.startswith('/gpu:'):
       i = int(name.split(':', 1)[-1])
-      return tf.device(get_cores()[i].name)
+      return tf.device(get_cores(session=session)[i].name)
     if name.startswith('/tpu:'):
       i = int(name.split(':', 1)[-1])
       return tf.device(device_for_tpu_core(core=i))
     if name.startswith('/cpu:'):
       i = int(name.split(':', 1)[-1])
-      return tf.device(get_cpus()[i].name)
+      return tf.device(get_cpus(session=session)[i].name)
     return nullcontext()
   if name is None:
     return tf.device(None)
   if 'gpu' in name:
-    if has_gpu():
+    if has_gpu(session=session):
       return tf.device(name)
   if 'cpu' in name:
     return tf.device(name)
