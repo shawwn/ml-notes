@@ -129,8 +129,12 @@ def make_source_tokens(index, num_hosts, n_vocab):
         npz = np.load(FLAGS.dataset)
         for item in npz.files:
           tokens.extend(npz[item])
-        if FLAGS.export_dataset is not None:
-          export_source_tokens(FLAGS.export_dataset, tokens)
+      if FLAGS.export_dataset is not None:
+        print("Exporting tokens to %s..." % FLAGS.export_dataset)
+        export_source_tokens(FLAGS.export_dataset, tokens)
+        print("Done; quitting.")
+        import sys
+        sys.exit(0)
     else:
       tokens = [(_ + 0) % n_vocab for _ in range(0, 100000)]
     tf.logging.info("Dataset has %d tokens", len(tokens))
