@@ -254,7 +254,7 @@ def init_tpu_config(name, host=None, timeout_in_ms=600 * 60 * 1000):
   master = cluster_resolver.get_master()
   return master, config
 
-def init_tpu(name, host=None, timeout_in_ms=600 * 60 * 1000):
+def init_tpu(name, host=None, timeout_in_ms=600 * 60 * 1000, interactive=False):
   tpu_init = [tpu.initialize_system()]
   cluster_resolver = TPUClusterResolver(name, host=host)
   config = tf.ConfigProto(operation_timeout_in_ms=timeout_in_ms,
@@ -265,7 +265,7 @@ def init_tpu(name, host=None, timeout_in_ms=600 * 60 * 1000):
   cluster_spec = cluster_resolver.cluster_spec()
   if cluster_spec:
     config.cluster_def.CopyFrom(cluster_spec.as_cluster_def())
-  init_sess = tf.Session(cluster_resolver.get_master(), config=config)
+  init_sess = (tf.InteractiveSession if interactive else tf.Session)(cluster_resolver.get_master(), config=config)
   init_sess.run(tpu_init)
   return init_sess, cluster_resolver
 
