@@ -118,12 +118,19 @@ def make_source_tokens(index, num_hosts, n_vocab):
   else:
     #tokens = [(_ + 0) for _ in range(0, n_ctx+1)]
     if FLAGS.dataset is not None:
-      tokens = []
-      npz = np.load(FLAGS.dataset)
-      for item in npz.files:
-        tokens.extend(npz[item])
-      if FLAGS.export_dataset is not None:
-        export_source_tokens(FLAGS.export_dataset, tokens)
+      if FLAGS.dataset.endswith('.tok16'):
+        print("Reading tokens from %s..." % FLAGS.dataset)
+        with tf.io.gfile.GFile(FLAGS.dataset, 'rb') as f:
+          data = f.read()
+          tokens = np.frombuffer(data, dtype=np.uint16)
+      else:
+        print("Loading tokens from %s..." % FLAGS.dataset)
+        tokens = []
+        npz = np.load(FLAGS.dataset)
+        for item in npz.files:
+          tokens.extend(npz[item])
+        if FLAGS.export_dataset is not None:
+          export_source_tokens(FLAGS.export_dataset, tokens)
     else:
       tokens = [(_ + 0) % n_vocab for _ in range(0, 100000)]
     tf.logging.info("Dataset has %d tokens", len(tokens))
