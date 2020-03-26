@@ -1150,3 +1150,8 @@ def absolute_name_scope(scope):
 def absolute_variable_scope(scope, **kwargs):
     return tf.variable_scope(tf.VariableScope(name=scope, **kwargs), auxiliary_name_scope=False)
 
+def run(*args, **kws):
+  session = kws.pop('session') if 'session' in kws else None
+  session = get_session(session)
+  return session.run(*args, **kws)
+
