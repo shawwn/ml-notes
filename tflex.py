@@ -255,7 +255,16 @@ class TPUClusterResolver(BaseTPUClusterResolver):
     print(spec2.as_cluster_def())
     return spec2
 
-def init_tpu_config(name, host=None, timeout_in_ms=5 * 60 * 1000):
+if not hasattr(tflex.state, 'timeout_in_ms'):
+  tflex.state.timeout_in_ms = 5 * 60 * 1000 # no TPU operation should last more than 5 minutes
+
+def get_session_timeout_in_ms(timeout_in_ms=None):
+  if timeout_in_ms is None:
+    timeout_in_ms = tflex.state.timeout_in_ms
+  return timeout_in_ms
+
+def init_tpu_config(name, host=None, timeout_in_ms=None):
+  timeout_in_ms = get_session_timeout_in_ms(timeout_in_ms)
   cluster_resolver = TPUClusterResolver(name, host=host)
   config = tf.ConfigProto(operation_timeout_in_ms=timeout_in_ms,
                           graph_options=tf.GraphOptions(
@@ -299,13 +308,14 @@ class TPUSessionCreator(CountingSessionCreator):
 from tensorflow.python.training import monitored_session
 
 class TPUSession(monitored_session._RecoverableSession):
-  def __init__(self, name, host=None, timeout_in_ms=5 * 60 * 1000, interactive=False, graph=None, initialize=True):
+  def __init__(self, name, host=None, timeout_in_ms=None, interactive=False, graph=None, initialize=True):
     super(TPUSession, self).__init__(TPUSessionCreator(name=name, host=host, timeout_in_ms=timeout_in_ms, interactive=interactive, graph=graph, initialize=initialize))
 
   def list_devices(self):
     return self._sess.list_devices()
 
-def init_tpu(name, host=None, timeout_in_ms=5 * 60 * 1000, interactive=False, graph=None, initialize=True):
+def init_tpu(name, host=None, timeout_in_ms=None, interactive=False, graph=None, initialize=True):
+  timeout_in_ms = get_session_timeout_in_ms(timeout_in_ms)
   cluster_resolver = TPUClusterResolver(name, host=host)
   graph = get_graph(graph)
   config = tf.ConfigProto(operation_timeout_in_ms=timeout_in_ms,
@@ -410,9 +420,10 @@ def print_backtrace():
     traceback.print_exc()
 
 class Session(tf.Session):
-  def __init__(self, target='auto', graph=None, config=None, init_tpu=False, id=None):
+  def __init__(self, target='auto', graph=None, config=None, id=None, timeout_in_ms=None):
     if config is None:
-      config = tf.ConfigProto(operation_timeout_in_ms=6000 * 60 * 1000,
+      timeout_in_ms = get_session_timeout_in_ms(timeout_in_ms)
+      config = tf.ConfigProto(operation_timeout_in_ms=timeout_in_ms,
                               graph_options=tf.GraphOptions(
                                 rewrite_options=rewriter_config_pb2.RewriterConfig(
                                   disable_meta_optimizer=True)),
@@ -439,13 +450,6 @@ class Session(tf.Session):
   @property
   def _spec(self):
     return '#%d' % self.id if self.id is not None else ''
-
-  def ensure(self):
-    if self.init_tpu:
-      print(self._spec, "Initializing TPU...")
-      #sess.run(tpu.initialize_system())
-      init_tpu(session=self, timeout_in_ms=20000)
-      self.init_tpu = None
 
   def run(self, *args, **kws):
     if state.break_next_run:
