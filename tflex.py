@@ -1217,3 +1217,12 @@ def run(*args, **kws):
   session = get_session(session)
   return session.run(*args, options=options, **kws)
 
+def num_cores():
+  return len(get_cores()
+
+def parallel(f, inputs=[], session=None):
+  session = get_session(session)
+  assert has_tpu(session=session)
+  (results,) = tpu.shard(f, inputs=inputs, num_shards=num_cores(session=session), outputs_from_all_shards=True)
+  return results
+
