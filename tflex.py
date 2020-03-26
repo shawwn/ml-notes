@@ -1010,6 +1010,18 @@ def device_name(name, session=None):
     return get_cpus(session=session)[i].name
   return name
 
+def dev(name, session=None):
+  return tf.device(device_name(name, session))
+
+def cpu(index, session=None):
+  return dev("/cpu:%d" % index, session=session)
+
+def gpu(index, session=None):
+  return dev("/gpu:%d" % index, session=session)
+
+def tpu(index, session=None):
+  return dev("/tpu:%d" % index, session=session)
+
 def device(name='', session=None):
   session = get_session(session)
   if has_override_device(session=session):
