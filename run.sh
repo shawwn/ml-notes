@@ -1,7 +1,7 @@
 #!/bin/sh
 source "${HOME}/bin/activate-tf1"
 set -x
-if [ -z $TPU_HOST ]
+if [ ! -z $TPU_HOST ]
 then
   1>&2 echo "Set \$TPU_HOST"
   exit 1
@@ -102,6 +102,20 @@ restore_dir="${model_dir}"
 dataset="--dataset combined-pgpf-ftfy.txt.npz"
 #unset restore_dir
 #gsutil -m rm -rf "${model_dir}"
+
+params=117M.json
+model_dir=gs://danbooru-euw4a/checkpoint/test117m-v3-128-0-poetry-0
+#restore_dir=gs://danbooru-euw4a/checkpoint/test117m-v3-512-2-poetry-0
+#tpu=tpu-v3-128-euw4a-1
+tpu=tpu-v3-128-euw4a-1
+export TPU_CORES=128
+restore_dir=gs://danbooru-euw4a/models/117M
+restore_trainable="--restore_trainable_variables true"
+dataset="--dataset combined-pgpf-ftfy.txt.npz"
+#dataset="--dataset gs://danbooru-euw4a/datasets/combined-pgpf-ftfy/*.tfrecords"
+restore_dir="${model_dir}"
+
+
 
 if [ ! -z "$restore_dir" ]
 then
