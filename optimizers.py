@@ -88,10 +88,10 @@ def create_train_op(loss, params):
 
     def logvars(variables, label, print_variables=False):
       if print_variables:
-        tf.logging.info("%s (%s parameters): %s", label, paramcount(vs), pps(vs))
+        tf.logging.info("%s (%s parameters): %s", label, paramcount(variables), pps(variables))
       else:
-        tf.logging.info("%s (%s parameters)", label, paramcount(vs))
-      return vs
+        tf.logging.info("%s (%s parameters)", label, paramcount(variables))
+      return variables
 
     tf.logging.info("Training %d parameters (%.2fM) out of %d parameters (%.2fM)" % (
       paramcount(train_vars), paramcount(train_vars)/(1024.0*1024.0),
