@@ -206,6 +206,8 @@ def bpe_text(batch_size, files, iterations, stitch, amount=1024, batch=True):
         r2 = tf.reshape(r2, [amount]) # TPUs want constant sized input, and these reshapes makes it recognize the shape of the input
         vals1 = tf.gather(x, r1)
         vals2 = tf.gather(x, r2)
+        vals1 = tf.cast(vals1, tf.dtypes.int32)
+        vals2 = tf.cast(vals2, tf.dtypes.int32)
         return vals1, vals2
 
     if batch:
