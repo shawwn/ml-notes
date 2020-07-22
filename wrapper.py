@@ -4,6 +4,7 @@ from __future__ import division
 from __future__ import print_function
 
 from pprint import pprint as pp
+from contextlib import contextmanager
 
 import sys
 import os
@@ -14,6 +15,7 @@ from six.moves.urllib.error import URLError
 from tensorflow.python import framework
 from tensorflow.python.client import session
 from tensorflow.python.distribute.cluster_resolver import tpu_cluster_resolver as resolver
+from tensorflow.contrib.cluster_resolver import TPUClusterResolver as BaseTPUClusterResolver
 from tensorflow.python.eager.context import LogicalDevice
 from tensorflow.python.framework import errors
 from tensorflow.python.framework import test_util
@@ -41,6 +43,40 @@ def reroute(addr, host=None):
   else:
     return addr
   return host + ':' + str(port)
+
+
+class TPUClusterResolver(BaseTPUClusterResolver):
+  def __init__(self, *args, host=None, node_count=None, node_offset=None, **kws):
+    super(TPUClusterResolver, self).__init__(*args, **kws)
+    if host is None:
+      host = _tpu_host()
+    self._host = host
+    if node_count is None:
+      if 'TPU_NODE_COUNT' in os.environ:
+        node_count = int(os.environ['TPU_NODE_COUNT'])
+    self._node_count = node_count
+    if node_offset is None:
+      if 'TPU_NODE_OFFSET' in os.environ:
+        node_offset = int(os.environ['TPU_NODE_OFFSET'])
+    self._node_offset = node_offset
+
+  def master(self, *args, **kws):
+    ip = super(TPUClusterResolver, self).master(*args, **kws)
+    return reroute(ip, host=self._host)
+
+  def cluster_spec(self):
+    spec = super(TPUClusterResolver, self).cluster_spec()
+    r = dict()
+    for k, v in spec.as_dict().items():
+      r[k] = [reroute(ip, host=self._host) for ip in v]
+    i = self._node_count or len(r['worker'])
+    j = self._node_offset or 0
+    r['worker'] = [r['worker'][0]] + r['worker'][(j+1):(j+1)+(i-1)]
+    spec2 = server_lib.ClusterSpec(r)
+    print(spec2.as_cluster_def())
+    return spec2
+
+
 
 _master = resolver.TPUClusterResolver.master
 
@@ -74,43 +110,57 @@ def _fetch_cloud_tpu_metadata(cls, *args, **kws):
       else:
         raise e
 
+@contextmanager
+def patch_tensorflow():
+  with mock.patch.object(resolver.TPUClusterResolver, 'master', mock_master):
+    with mock.patch.object(resolver.TPUClusterResolver, 'cluster_spec', cluster_spec):
+      with mock.patch.object(resolver.TPUClusterResolver, '_fetch_cloud_tpu_metadata', _fetch_cloud_tpu_metadata):
+        result = yield
+        return result
+
+def patch_tensorflow_interactive():
+  patch = patch_tensorflow()
+  patch.__enter__()
+  return patch
+
+
 def interact():
     import code
     code.InteractiveConsole(locals=globals()).interact()
 
 if __name__ == '__main__':
-  with mock.patch.object(resolver.TPUClusterResolver, 'master', mock_master):
-    with mock.patch.object(resolver.TPUClusterResolver, 'cluster_spec', cluster_spec):
-      with mock.patch.object(resolver.TPUClusterResolver, '_fetch_cloud_tpu_metadata', _fetch_cloud_tpu_metadata):
-        if len(sys.argv) <= 1:
-          from tensorflow.core.protobuf import config_pb2
-          import tensorflow as tf
-          import numpy as np
-          session_config = config_pb2.ConfigProto(allow_soft_placement=True, isolate_session_state=True)
-          res = resolver.TPUClusterResolver(os.environ['TPU_NAME'])
-          cluster_spec = res.cluster_spec()
-          if cluster_spec:
-            cluster = cluster_spec.as_cluster_def()
-            session_config.cluster_def.CopyFrom(cluster_spec.as_cluster_def())
-          else:
-            cluster = None
-          master = res.get_master()
-          graph = tf.Graph()
-          sess = tf.compat.v1.InteractiveSession(master, graph=graph, config=session_config)
-          devices = sess.list_devices()
-          num_cores = len([x for x in devices if ':TPU:' in x.name])
-          print(cluster)
-          print('ip: %s', master, num_cores)
-          r = sess.run
-          from tensorflow.python.tpu import tpu as tpu_ops
-          from tensorflow.compiler.tf2xla.python import xla
-          from tensorflow.compiler.tf2xla.ops import gen_xla_ops
-          interact()
-        else:
-          filename = sys.argv[1]
-          sys.argv = sys.argv[1:]
-          with open(filename) as f:
-            source = f.read()
-          code = compile(source, filename, 'exec')
-          exec(code, globals(), globals())
+  _tf_patch = patch_tensorflow_interactive()
+  if len(sys.argv) <= 1:
+    from tensorflow.core.protobuf import config_pb2
+    import tensorflow as tf
+    import numpy as np
+    session_config = config_pb2.ConfigProto(allow_soft_placement=True, isolate_session_state=True)
+    master = None
+    res = None
+    cluster_spec = None
+    cluster_def = None
+    if 'TPU_NAME' in os.environ:
+      res = resolver.TPUClusterResolver(os.environ['TPU_NAME'])
+      master = res.get_master()
+      cluster_spec = res.cluster_spec()
+      if cluster_spec:
+        cluster_def = cluster_spec.as_cluster_def()
+        session_config.cluster_def.CopyFrom(cluster_def)
+    graph = tf.Graph()
+    sess = tf.compat.v1.InteractiveSession(master, graph=graph, config=session_config)
+    devices = sess.list_devices()
+    num_cores = len([x for x in devices if ':TPU:' in x.name])
+    print(cluster_def)
+    print('ip: %s', master, num_cores)
+    r = sess.run
+    from tensorflow.python.tpu import tpu as tpu_ops
+    from tensorflow.compiler.tf2xla.python import xla
+    from tensorflow.compiler.tf2xla.ops import gen_xla_ops
+  else:
+    filename = sys.argv[1]
+    sys.argv = sys.argv[1:]
+    with open(filename) as f:
+      source = f.read()
+    code = compile(source, filename, 'exec')
+    exec(code, globals(), globals())
 
