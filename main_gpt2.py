@@ -33,12 +33,7 @@ from input_fns import gpt2_input
 
 import json
 
-
-def getval(name, default, dtype='str'):
-  if name.upper() in os.environ:
-    value = os.environ[name.upper()]
-  else:
-    value = params.get(name, default)
+def parseval(value, dtype):
   if dtype == 'str':
     pass
   if dtype == 'int' or isinstance(default, int):
@@ -46,7 +41,6 @@ def getval(name, default, dtype='str'):
   if dtype == 'float' or isinstance(default, float):
     value = float(value)
   elif dtype == 'bool' or isinstance(default, bool):
-    assert isinstance(value, str)
     if value == '1' or value.lower() == 'true':
       value = True
     else:
@@ -54,7 +48,17 @@ def getval(name, default, dtype='str'):
   else:
     assert dtype is not None
     value = dtype(value)
-  tf.logging.info('getval(%s, %s) = %s', repr(name), repr(default), repr(value))
+  return value
+
+
+def getval(name, default, dtype='str'):
+  if name.upper() in os.environ:
+    value = os.environ[name.upper()]
+    value = parseval(value, dtype=dtype)
+    tf.logging.info('getval(%s, %s) = os.environ[%s] = %s', repr(name), repr(default), repr(name.upper()), repr(value))
+  else:
+    value = params.get(name, default)
+    tf.logging.info('getval(%s, %s) = params[%s] = %s', repr(name), repr(default), repr(name), repr(value))
   return value
 
 
