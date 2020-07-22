@@ -81,7 +81,7 @@ def create_train_op(loss, params):
       return True
     train_vars = [v for v in tf.trainable_variables() if should_train_variable(v)]
     non_train_vars = [v for v in tf.trainable_variables() if not should_train_variable(v)]
-    other_vars = [v for v in tf.global_variables() if v not in train_vars and not in non_train_vars]
+    other_vars = [v for v in tf.global_variables() if v not in train_vars and v not in non_train_vars]
     local_vars = [v for v in tf.local_variables()]
 
     paramcount = lambda vs: sum([np.prod(v.shape.as_list()) for v in vs])
