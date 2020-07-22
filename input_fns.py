@@ -2,6 +2,7 @@ import numpy as np
 import tensorflow as tf
 import tflex
 import os
+import tqdm
 from pprint import pprint as pp
 
 from train_flags import FLAGS
@@ -145,8 +146,14 @@ def make_source_tokens(index, num_hosts, n_vocab):
   j = (index + 1) * k
   tokens = tokens[i:j]
   tf.logging.info("Shard %d/%d has %d tokens", index, num_hosts, len(tokens))
-  t = tf.broadcast_to(tf.cast(tokens, tf.int32), [len(tokens)])
-  dset = tf.data.Dataset.from_tensors(t);
+  dset = None
+  for offset in tqdm.trange(0, len(tokens), 10e6):
+    t = tokens[offset:offset+10e6]
+    t = tf.broadcast_to(tf.cast(t, tf.int32), [len(t)])
+    if dset is None:
+      dset = tf.data.Dataset.from_tensors(t);
+    else:
+      dset = dset.concatenate(dset)
   if _loaded_dataset is not None:
     if index >= num_hosts - 1:
       tf.logging.info('Resetting tokens')
