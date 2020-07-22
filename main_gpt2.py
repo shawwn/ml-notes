@@ -51,7 +51,7 @@ def parseval(value, dtype, default=None):
   return value
 
 
-def getval(name, default, dtype='str'):
+def getval(name, default, dtype=None):
   if name.upper() in os.environ:
     value = os.environ[name.upper()]
     value = parseval(value, dtype=dtype, default=default)
