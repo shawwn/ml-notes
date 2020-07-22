@@ -76,7 +76,16 @@ class TFRecordExporter:
 
 
 # Sample 1024(+1) tokens from the stitched together text
-def sample_text(x, amount):
+def sample_text(x, amount, batch_size=None):
+  if batch_size is not None:
+    features, labels = [], []
+    for i in range(batch_size):
+      features1, labels1 = sample_text(x, amount)
+      features.append(features1)
+      labels.append(labels1)
+    features = tf.stack(features)
+    labels = tf.stack(labels)
+    return features, labels
   s = tf.size(x)
   r = tf.random.uniform([], maxval=s-(amount+1), dtype=tf.dtypes.int32)
   r1 = tf.range(r, r+amount)
@@ -284,7 +293,7 @@ def gpt2_input(params):
     with tf.variable_scope('input', reuse=tf.AUTO_REUSE):
       tokens_var = tf.get_local_variable('tokens', dtype=tf.uint16, shape=[tokens_count])
     def sample_fn():
-      return sample_text(tokens_var, amount=params['n_ctx'])
+      return sample_text(tokens_var, amount=params['n_ctx'], batch_size=batch_size)
     def init_fn():
       return tokens_var.initializer
     def upload_fn(session=None):
