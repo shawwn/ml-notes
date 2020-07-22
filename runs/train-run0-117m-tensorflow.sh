@@ -68,7 +68,7 @@ while true; do
   echo "Starting production training run in 10s ..."
   sleep 10
 
-  timeout --signal=SIGKILL 19h python3 wrapper.py main_gpt2.py --tpu "${TPU_NAME}" --model_dir "${MODEL_DIR}" ${RESTORE_DIR} --params "${MODEL_NAME}.json" --num_cores "${TPU_CORES}" ${DATASET} "$@" 2>&1 | tee -a "${logfile}" | tee /dev/fd/2 | gsutil cp - "${cloudlogfile}"
+  timeout --signal=SIGKILL 19h python3 wrapper.py main_gpt2.py --tpu "${TPU_NAME}" --model_dir "${MODEL_DIR}" ${RESTORE_DIR} --params "${MODEL_NAME}.json" --num_cores "${TPU_CORES}" ${DATASET} "$@" 2>&1 | tee -a "${logfile}" | tee /dev/fd/2 | gsutil cp - "${cloud_log_file}"
   if [ ! -z "$TPU_NO_RECREATE" ]
   then
     echo "Not recreating TPU. Waiting 120s."
