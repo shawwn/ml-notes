@@ -567,6 +567,8 @@ def element_count(x):
     x = x.as_list()
   return int(np.prod(x))
 
+from contextlib import contextmanager
+
 @contextmanager
 def with_elapsed(thunk, include_result=True):
   start = time.time()
@@ -586,7 +588,6 @@ def on_elapsed(callback):
     elapsed = time.time() - start
     callback(elapsed)
   return result
-
 
 def assign_values(variables, values, session=None, timeout_in_ms=600000):
   session = session or get_default_session()
@@ -1031,16 +1032,16 @@ def freeze_forever():
 
 _quit = False
 
-import sys
+import posix
 
 @register_command
 def quit():
   global _quit
   if _quit:
-    print("Failed to quit; running sys.exit(1)")
-    sys.exit(1)
+    print("Failed to quit; terminating via posix._exit(1)")
+    posix._exit(1)
   else:
-    print("Quitting...")
+    print("Signaling to main program that we should quit...")
     _quit = True
 
 def should_quit():
@@ -1565,7 +1566,6 @@ class Dictator(dict):
     self[k] = v
   def __delattr__(self, k):
     del self[k]
-  
 
 class DatasetFunctionIterator:
   def __init__(self, parent):
@@ -1574,7 +1574,6 @@ class DatasetFunctionIterator:
 
   def get_next(self):
     return self._parent._sample_fn()
-
 
 class DatasetFunction:
   def __init__(self, sample_fn, init_fn, **kws):
@@ -1586,21 +1585,17 @@ class DatasetFunction:
   def make_initializable_iterator(self):
     return DatasetFunctionIterator(self)
 
-
 make_dataset_function = DatasetFunction
 
 
 def is_integer(x):
   return np.can_cast(x, np.int32)
 
-
 def is_float(x):
   return np.can_cast(x, np.float32)
 
-
 def is_exact(x):
   return is_integer(x) or is_float(x) and x == int(x)
-
 
 def num(x, digits_after_decimal=2):
   if is_integer(x):

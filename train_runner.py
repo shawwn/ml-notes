@@ -304,6 +304,10 @@ class TrainRunner(object):
       elapsed = time.time() - now
       tf.logging.info('step %d: Saved checkpoint %s in %.2fs', step, path, elapsed)
 
+    @tflex.register_command
+    def save():
+      checkpoint_thread_fn(self.saver, self.sess)
+
     thread_id = 0
     checkpoint_threads = []
     need_final_checkpoint = False
@@ -313,6 +317,10 @@ class TrainRunner(object):
       checkpoint_threads.append(None)
     end_step = self.cur_step + self.train_steps
     while self.cur_step < end_step:
+      tflex.check_commands()
+      if tflex.should_quit():
+        tf.logging.info("TrainRunner: quitting")
+        break
       start = time.time()
       tf.logging.info("TrainRunner: start next %d steps", self.iterations)
       self.cur_step += self.iterations
