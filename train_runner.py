@@ -108,7 +108,7 @@ class TrainRunner(object):
     cluster_spec = self.cluster_resolver.cluster_spec()
     if cluster_spec:
       self.config.cluster_def.CopyFrom(cluster_spec.as_cluster_def())
-    self.init_sess = tf.Session(self.cluster_resolver.get_master(), config=self.config)
+    self.init_sess = tf.Session(self.cluster_resolver.get_master(), graph=self.init_graph, config=self.config)
     tf.logging.info("TrainRunner: initializing TPU session...")
     if not bool(int(os.environ.get('TPU_NO_INIT', '0'))):
       self.init_sess.run(self.tpu_init)
