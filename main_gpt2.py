@@ -36,9 +36,9 @@ import json
 def parseval(value, dtype, default=None):
   if dtype == 'str':
     pass
-  if dtype == 'int' or isinstance(default, int):
+  elif dtype == 'int' or isinstance(default, int):
     value = int(value)
-  if dtype == 'float' or isinstance(default, float):
+  elif dtype == 'float' or isinstance(default, float):
     value = float(value)
   elif dtype == 'bool' or isinstance(default, bool):
     if value == '1' or value.lower() == 'true':
