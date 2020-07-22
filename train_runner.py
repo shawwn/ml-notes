@@ -296,7 +296,13 @@ class TrainRunner(object):
       summary_writer = tf.compat.v1.summary.FileWriter(output_dir)
 
     def checkpoint_thread_fn(saver, sess):
-      saver.save(sess, FLAGS.model_dir + "/model.ckpt-%d" % (self.cur_step))
+      step = self.cur_step
+      path = FLAGS.model_dir + "/model.ckpt-%d" % step
+      tf.logging.info('step %d: Saving checkpoint %s...', step, path)
+      now = time.time()
+      saver.save(sess, path)
+      elapsed = time.time() - now
+      tf.logging.info('step %d: Saved checkpoint %s in %.2fs', step, path, elapsed)
 
     thread_id = 0
     checkpoint_threads = []
