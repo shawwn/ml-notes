@@ -151,11 +151,10 @@ def get_source_tokens(dataset=None, reload=False, export_dataset=None):
     dataset = FLAGS.dataset
   if export_dataset is None:
     export_dataset = FLAGS.export_dataset
-  if api.tokens is not None and not reload:
-    return api.tokens
-  unload_source_tokens()
-  api.tokens = load_source_tokens(dataset)
-  return tokens
+  if api.tokens is None or reload:
+    unload_source_tokens()
+    api.tokens = load_source_tokens(dataset)
+  return api.tokens
 
 def make_source_tokens(index, num_hosts, n_vocab):
   tokens = get_source_tokens()
@@ -265,26 +264,7 @@ def gpt2_input(params):
       files.extend(sorted(tf.io.gfile.glob(fname)))
     assert len(files) > 0
     dset = bpe_text(batch_size, files, iterations=iterations, stitch=min(2, len(files)), amount=params['n_ctx'], batch=True)
-  elif True:
-    #dset = make_source_tokens(current_host, num_hosts, n_vocab=params['n_vocab'])
-    tokens = get_source_tokens()
-    tokens_count = int(np.prod(tokens.shape))
-    with tf.variable_scope('input', reuse=tf.AUTO_REUSE):
-      tokens_var = tf.get_local_variable('tokens', dtype=tf.uint16, shape=[tokens_count])
-    def sample_fn():
-      return sample_text(tokens_var, amount=params['n_ctx'])
-    def init_fn(session=None):
-      if session is None:
-        session = tf.get_default_session()
-      assert session is not None
-      tf.logging.info('Loading %s tokens to TPU...', '{:,d}'.format(tokens_count))
-      now = time.time()
-      tokens_var.load(session, tokens)
-      elapsed = time.time()
-      tf.logging.info('Loaded %s tokens to TPU in %.2fs', '{:,d}'.format(tokens_count), elapsed)
-    dset = tflex.make_dataset_function(sample_fn=sample_fn, init_fn=init_fn)
-    return dset
-  else:
+  elif False:
     dset = make_source_tokens(current_host, num_hosts, n_vocab=params['n_vocab'])
     batch=True
     def _sample_text(*args, **kws):
@@ -297,5 +277,22 @@ def gpt2_input(params):
       dset = dset.repeat().prefetch(iterations)
     else:
       dset = dset.map(_sample_text, num_parallel_calls=tf.data.experimental.AUTOTUNE).repeat()
+  else:
+    #dset = make_source_tokens(current_host, num_hosts, n_vocab=params['n_vocab'])
+    tokens = get_source_tokens()
+    tokens_count = int(np.prod(tokens.shape))
+    with tf.variable_scope('input', reuse=tf.AUTO_REUSE):
+      tokens_var = tf.get_local_variable('tokens', dtype=tf.uint16, shape=[tokens_count])
+    def sample_fn():
+      return sample_text(tokens_var, amount=params['n_ctx'])
+    def init_fn(session=None):
+      if session is None:
+        session = tf.get_default_session()
+      tf.logging.info('Loading %s tokens to TPU...', tflex.num(tokens_count))
+      assert session is not None
+      with tflex.with_elapsed(lambda: tflex.assign_values([tokens_var], [tokens])) as elapsed, result:
+        tf.logging.info('Loaded %s tokens to TPU in %.2fs', tflex.num(tokens_count), elapsed)
+    dset = tflex.make_dataset_function(sample_fn=sample_fn, init_fn=init_fn)
+    return dset
   return dset
 

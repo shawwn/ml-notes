@@ -467,14 +467,12 @@ class Session(tf.Session):
       print(self._spec, 'Session.run', *[pretty(x) for x in args], *[pretty(k)+'='+pretty(v) for k, v in kws.items()])
       if state.noisy_backtrace:
         print_backtrace()
-    start = time.time()
-    result = super(Session, self).run(*args, **kws)
-    elapsed = time.time() - start
-    if state.noisy:
-      print(self._spec, 'Session.run (finished in %.2fs)' % elapsed, pretty(result), *[pretty(x) for x in args], *[pretty(k)+'='+pretty(v) for k, v in kws.items()])
-      if state.noisy_backtrace:
-        print_backtrace()
-    return result
+    with with_elapsed(lambda: super(Session, self).run(*args, **kws)) as elapsed, result:
+      if state.noisy:
+        print(self._spec, 'Session.run (finished in %.2fs)' % elapsed, pretty(result), *[pretty(x) for x in args], *[pretty(k)+'='+pretty(v) for k, v in kws.items()])
+        if state.noisy_backtrace:
+          print_backtrace()
+      return result
 
 
 def split_by_params(vs, n=None, f=None):
@@ -555,6 +553,41 @@ def grab_values(variables, reader, reshape=False):
     value = truncate_value(variable, value, reshape=reshape)
     yield variable, value
 
+import collections
+
+def is_list(x):
+  return isinstance(x, collections.Sequence)
+
+def element_count(x):
+  if is_list(x):
+    return sum([element_count(v) for v in x])
+  if hasattr(x, 'shape'):
+    x = x.shape
+  if hasattr(x, 'as_list'):
+    x = x.as_list()
+  return int(np.prod(x))
+
+@contextmanager
+def with_elapsed(thunk, include_result=True):
+  start = time.time()
+  if thunk is not None:
+    result = thunk()
+  elapsed = time.time() - start
+  if include_result:
+    yield elapsed, result
+  else:
+    yield elapsed
+
+@contextmanager
+def on_elapsed(callback):
+  start = time.time()
+  result = yield
+  if callback is not None:
+    elapsed = time.time() - start
+    callback(elapsed)
+  return result
+
+
 def assign_values(variables, values, session=None, timeout_in_ms=600000):
   session = session or get_default_session()
   variables = [x for x in variables]
@@ -566,7 +599,11 @@ def assign_values(variables, values, session=None, timeout_in_ms=600000):
   options = None
   if timeout_in_ms:
     options=config_pb2.RunOptions(timeout_in_ms=timeout_in_ms)
-  session.run(ops, vals, options=options)
+  if state.noisy:
+    tf.logging.info('Loading %s elements to TPU: %s', num(element_count(variables)))
+  with with_elapsed(lambda: session.run(ops, vals, options=options)) as elapsed, result:
+    if state.noisy:
+      tf.logging.info('Loaded %s elements to TPU in %.2fs: %s', num(element_count(variables)), elapsed)
 
 def load_snapshot(ckpt, session=None, var_list=None, reshape=False):
   session = session or get_default_session()
@@ -1551,3 +1588,24 @@ class DatasetFunction:
 
 
 make_dataset_function = DatasetFunction
+
+
+def is_integer(x):
+  return np.can_cast(x, np.int32)
+
+
+def is_float(x):
+  return np.can_cast(x, np.float32)
+
+
+def is_exact(x):
+  return is_integer(x) or is_float(x) and x == int(x)
+
+
+def num(x, digits_after_decimal=2):
+  if is_integer(x):
+    spec = '{:,d}'
+  else:
+    spec = '{:,.%df}' % digits_after_decimal
+  return spec.format(x)
+
