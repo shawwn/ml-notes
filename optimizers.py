@@ -126,8 +126,7 @@ def create_train_op(loss, params):
       #grads = memory_saving_gradients.gradients_memory if i == 0 else memory_saving_gradients.gradients_speed
       #grads = memory_saving_gradients.gradients_speed if i == 0 else memory_saving_gradients.gradients_speed
       grads = memory_saving_gradients.gradients
-      grads = grads(loss, train_vars, colocate_gr
-ients_with_ops=colocate_gradients_with_ops, gate_gradients=gate_gradients)
+      grads = grads(loss, train_vars, colocate_grients_with_ops=colocate_gradients_with_ops, gate_gradients=gate_gradients)
     else:
       grads = gradients.gradients(loss, train_vars, colocate_gradients_with_ops=colocate_gradients_with_ops, gate_gradients=gate_gradients)
 
