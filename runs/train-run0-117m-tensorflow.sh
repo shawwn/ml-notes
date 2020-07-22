@@ -4,7 +4,7 @@ export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-/tfk/lib}"
 export TPU_HOST=${TPU_HOST:-10.255.128.2}
 export TPU_NAME="${TPU_NAME:-tpu-v3-128-euw4a-50}"
 
-export RUN_ID="${RUN_ID:-b}"
+export RUN_ID="${RUN_ID:-a}"
 export RUN_NAME="${RUN_NAME:-gpt2run00}"
 export RUN_DESC="${RUN_DESC:-117M test run}"
 tmux-set-title "${RUN_NAME}/${RUN_ID} ${TPU_NAME}"
