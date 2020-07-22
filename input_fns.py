@@ -109,39 +109,56 @@ def make_source_dataset(index, num_hosts, batch_size, n_ctx):
     return dset
 
 def export_source_tokens(tfrecord_dir, tokens):
+  tf.logging.info("Exporting tokens to %s...", FLAGS.export_dataset)
   with TFRecordExporter(tfrecord_dir, 1) as tfr:
     tfr.add_tokens(tokens)
+  tf.logging.info("Exported tokens to %s", FLAGS.export_dataset)
 
-_loaded_dataset = None
+if 'api' not in globals():
+  api = tflex.Dictator()
+  api.tokens = None
+
+def unload_source_tokens():
+  api.tokens = None
+
+def load_source_tokens(dataset, export_dataset=None, quit_after_exporting=True):
+  if dataset is None:
+    tf.logging.info("Generating random fake tokens")
+    tokens = [(_ + 0) % n_vocab for _ in range(0, 100000)]
+  elif dataset.endswith('.tok16'):
+    tf.logging.info("Reading tokens from %s...", dataset)
+    with tf.io.gfile.GFile(dataset, 'rb') as f:
+      data = f.read()
+      tf.logging.info("len(data)=%s; np.frombuffer(data, dtype=np.uint16)...", len(data), dataset)
+      tokens = np.frombuffer(data, dtype=np.uint16)
+  else:
+    tf.logging.info("Loading tokens from %s...", dataset)
+    tokens = []
+    npz = np.load(dataset)
+    for item in npz.files:
+      tokens.extend(npz[item])
+  tf.logging.info("Finished reading tokens.")
+  if export_dataset:
+    export_source_tokens(export_dataset, tokens)
+    if quit_after_exporting:
+      tf.logging.info("Tokens exported; quitting.")
+      import posix
+      posix._exit(0)
+  return tokens
+
+def get_source_tokens(dataset=None, reload=False, export_dataset=None):
+  if dataset is None:
+    dataset = FLAGS.dataset
+  if export_dataset is None:
+    export_dataset = FLAGS.export_dataset
+  if api.tokens is not None and not reload:
+    return api.tokens
+  unload_source_tokens()
+  api.tokens = load_source_tokens(dataset)
+  return tokens
 
 def make_source_tokens(index, num_hosts, n_vocab):
-  global _loaded_dataset
-  if _loaded_dataset is not None:
-    tokens = _loaded_dataset
-  else:
-    #tokens = [(_ + 0) for _ in range(0, n_ctx+1)]
-    if FLAGS.dataset is not None:
-      if FLAGS.dataset.endswith('.tok16'):
-        print("Reading tokens from %s..." % FLAGS.dataset)
-        with tf.io.gfile.GFile(FLAGS.dataset, 'rb') as f:
-          data = f.read()
-          tokens = np.frombuffer(data, dtype=np.uint16)
-      else:
-        print("Loading tokens from %s..." % FLAGS.dataset)
-        tokens = []
-        npz = np.load(FLAGS.dataset)
-        for item in npz.files:
-          tokens.extend(npz[item])
-      if FLAGS.export_dataset is not None:
-        print("Exporting tokens to %s..." % FLAGS.export_dataset)
-        export_source_tokens(FLAGS.export_dataset, tokens)
-        print("Done; quitting.")
-        import sys
-        sys.exit(0)
-    else:
-      tokens = [(_ + 0) % n_vocab for _ in range(0, 100000)]
-    tf.logging.info("Dataset has %d tokens", len(tokens))
-    _loaded_dataset = tokens
+  tokens = get_source_tokens()
   n = len(tokens)
   k = n // num_hosts
   i = index * k
@@ -225,7 +242,6 @@ def bpe_text(batch_size, files, iterations, stitch, amount=1024, batch=True):
     return dataset
 
 
-
 def gpt2_input(params):
   pp({'op': 'gpt2_input', 'params': params})
   batch_size = params['batch_size']
@@ -249,6 +265,25 @@ def gpt2_input(params):
       files.extend(sorted(tf.io.gfile.glob(fname)))
     assert len(files) > 0
     dset = bpe_text(batch_size, files, iterations=iterations, stitch=min(2, len(files)), amount=params['n_ctx'], batch=True)
+  elif True:
+    #dset = make_source_tokens(current_host, num_hosts, n_vocab=params['n_vocab'])
+    tokens = get_source_tokens()
+    tokens_count = int(np.prod(tokens.shape))
+    with tf.variable_scope('input', reuse=tf.AUTO_REUSE):
+      tokens_var = tf.get_local_variable('tokens', dtype=tf.uint16, shape=[tokens_count])
+    def sample_fn():
+      return sample_text(tokens_var, amount=params['n_ctx'])
+    def init_fn(session=None):
+      if session is None:
+        session = tf.get_default_session()
+      assert session is not None
+      tf.logging.info('Loading %s tokens to TPU...', '{:,d}'.format(tokens_count))
+      now = time.time()
+      tokens_var.load(session, tokens)
+      elapsed = time.time()
+      tf.logging.info('Loaded %s tokens to TPU in %.2fs', '{:,d}'.format(tokens_count), elapsed)
+    dset = tflex.make_dataset_function(sample_fn=sample_fn, init_fn=init_fn)
+    return dset
   else:
     dset = make_source_tokens(current_host, num_hosts, n_vocab=params['n_vocab'])
     batch=True

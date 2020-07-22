@@ -1517,4 +1517,37 @@ def wrap_computation_in_while_loop(op_fn, n, parallel_iterations=1, as_callable=
       back_prop=False,
       parallel_iterations=parallel_iterations)
 
+
+class Dictator(dict):
+  def __getattr__(self, k):
+    try:
+      return self[k]
+    except KeyError:
+      raise AttributeError(k)
+  def __setattr__(self, k, v):
+    self[k] = v
+  def __delattr__(self, k):
+    del self[k]
   
+
+class DatasetFunctionIterator:
+  def __init__(self, parent):
+    self._parent = parent
+    self.initializer = parent._init_fn()
+
+  def get_next(self):
+    return self._parent._sample_fn()
+
+
+class DatasetFunction:
+  def __init__(self, sample_fn, init_fn, **kws):
+    self._sample_fn = sample_fn
+    self._init_fn = init_fn
+    assert callable(sample_fn)
+    assert callable(init_fn)
+
+  def make_initializable_iterator(self):
+    return DatasetFunctionIterator(self)
+
+
+make_dataset_function = DatasetFunction
