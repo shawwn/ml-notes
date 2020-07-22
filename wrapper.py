@@ -23,19 +23,6 @@ from tensorflow.python.util import compat
 
 mock = test.mock
 
-def mock_request_compute_metadata(cls, *args, **kwargs):
-  del cls, kwargs  # Unused.
-  if args[0] == 'project/project-id':
-    #return 'test-project'
-    return 'gpt-2-15b-poetry'
-  elif args[0] == 'instance/zone':
-    #return 'projects/test-project/locations/us-central1-c'
-    return 'projects/gpt-2-15b-poetry/locations/europe-west4-a'
-  elif args[0] == 'instance/network-interfaces/0/ip':
-    #return '10.128.1.2'
-    return '127.0.0.1'
-  return ''
-
 def reroute(addr, host=None):
   if host is None or host is False:
     return addr
@@ -108,9 +95,13 @@ if __name__ == '__main__':
           else:
             cluster = None
           master = res.get_master()
-          print(master, cluster)
           graph = tf.Graph()
           sess = tf.compat.v1.InteractiveSession(master, graph=graph, config=session_config)
+          devices = sess.list_devices()
+          num_cores = len([x for x in devices if ':TPU:' in x.name])
+          print(cluster)
+          print('ip: %s', master, num_cores)
+          r = sess.run
           from tensorflow.python.tpu import tpu as tpu_ops
           from tensorflow.compiler.tf2xla.python import xla
           from tensorflow.compiler.tf2xla.ops import gen_xla_ops
