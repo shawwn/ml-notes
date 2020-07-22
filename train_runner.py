@@ -110,7 +110,8 @@ class TrainRunner(object):
       self.config.cluster_def.CopyFrom(cluster_spec.as_cluster_def())
     self.init_sess = tf.Session(self.cluster_resolver.get_master(), config=self.config)
     tf.logging.info("TrainRunner: initializing TPU session...")
-    self.init_sess.run(tpu_init)
+    if not bool(int(os.environ.get('TPU_NO_INIT', '0'))):
+      self.init_sess.run(self.tpu_init)
     tf.logging.info("TrainRunner: initializing TPU session (done)")
 
   def device_for_host(self, task=0, cpu=0):
@@ -404,6 +405,7 @@ class TrainRunner(object):
 
   def shutdown(self):
     tf.logging.info("TrainRunner: shutting down...")
-    self.init_sess.run(self.tpu_shutdown)
-    tf.logging.info("TrainRunner: shutting down (done)")
+    if not bool(int(os.environ.get('TPU_NO_INIT', '0'))):
+      self.init_sess.run(self.tpu_shutdown)
+      tf.logging.info("TrainRunner: shutting down (done)")
 
