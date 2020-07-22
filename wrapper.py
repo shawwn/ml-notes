@@ -57,6 +57,9 @@ def reroute(addr, host=None):
 
 _master = resolver.TPUClusterResolver.master
 
+def _tpu_host():
+  return os.environ.get('TPU_HOST', '10.255.128.3')
+
 def mock_master(cls, *args, **kws):
   ip = _master(cls, *args, **kws)
   return reroute(ip, host=os.environ['TPU_HOST'])
@@ -93,6 +96,7 @@ if __name__ == '__main__':
           cluster = res.cluster_spec().as_cluster_def()
           master = res.get_master()
           print(master, cluster)
+          from tensorflow.core.protobuf import config_pb2
           session_config = config_pb2.ConfigProto(allow_soft_placement=True, isolate_session_state=True)
           cluster_spec = cluster.cluster_spec()
           if cluster_spec:
