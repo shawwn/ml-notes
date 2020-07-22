@@ -26,7 +26,7 @@ export TPU_CORES=$cores
 
 if [ ! -z "${DEV}" ]
 then
-  exec python3 -m pdb -c continue python3 wrapper.py main_gpt2.py --tpu "${tpu}" --model_dir "${model_dir}" ${restore_dir} --params "${params}" --num_cores "${TPU_CORES}" ${dataset} "$@"
+  exec python3 -m pdb -c continue wrapper.py main_gpt2.py --tpu "${tpu}" --model_dir "${model_dir}" ${restore_dir} --params "${params}" --num_cores "${TPU_CORES}" ${dataset} "$@"
   exit -1
 fi
 
