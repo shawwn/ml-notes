@@ -87,6 +87,10 @@ def _fetch_cloud_tpu_metadata(cls, *args, **kws):
       else:
         raise e
 
+def interact():
+    import code
+    code.InteractiveConsole(locals=globals()).interact()
+
 if __name__ == '__main__':
   with mock.patch.object(resolver.TPUClusterResolver, 'master', mock_master):
     with mock.patch.object(resolver.TPUClusterResolver, 'cluster_spec', cluster_spec):
@@ -107,8 +111,10 @@ if __name__ == '__main__':
           print(master, cluster)
           graph = tf.Graph()
           sess = tf.compat.v1.InteractiveSession(master, graph=graph, config=session_config)
-          import pdb
-          pdb.set_trace()
+          from tensorflow.python.tpu import tpu as tpu_ops
+          from tensorflow.compiler.tf2xla.python import xla
+          from tensorflow.compiler.tf2xla.ops import gen_xla_ops
+          interact()
         else:
           filename = sys.argv[1]
           sys.argv = sys.argv[1:]
