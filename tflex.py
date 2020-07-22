@@ -1556,6 +1556,88 @@ def wrap_computation_in_while_loop(op_fn, n, parallel_iterations=1, as_callable=
       parallel_iterations=parallel_iterations)
 
 
+@contextmanager
+def with_flush(session=None, flush_session=True):
+  session = session or get_default_session()
+  if session is not None:
+    if flush_session:
+      flush(session)
+
+def get_pending_host_calls(graph=None):
+  graph = graph or get_default_graph()
+  if not hasattr(graph, 'pending_host_calls'):
+    graph.pending_host_calls = []
+  return graph.pending_host_calls
+
+def get_pending_host_call(graph=None):
+  graph = graph or get_default_graph()
+  if graph is None:
+    return None
+  pending = get_pending_host_calls(graph=graph)
+  try:
+    return pending.pop()
+  except IndexError:
+    pass
+
+def add_pending_host_call(thunk, graph=None):
+  graph = graph or get_default_graph()
+  pending = get_pending_host_calls(graph=graph)
+  pending.append(thunk)
+
+def get_graph_lock(graph):
+  if not hasattr(graph, 'tflex_lock'):
+    graph.tflex_lock = threading.RLock()
+  return graph.tflex_lock
+
+@contextmanager
+def with_graph(graph=None, allow_mutations=True, make_graph_default=True, use_locking=True):
+  graph = graph or get_default_graph()
+  if graph is None:
+    result = yield graph
+    return result
+  graph.switch_to_thread_local()
+  lock = get_graph_lock(graph) if use_locking else nullcontext()
+  with lock:
+    finalized = graph.finalized
+    if finalized and allow_mutations:
+      graph._unsafe_unfinalize()
+    try:
+      if make_graph_default:
+        with graph.as_default():
+          result = yield graph
+      else:
+        result = yield graph
+      return result
+    finally:
+      if finalized:
+        graph.finalize()
+
+
+def set_graph_local(self, name, value):
+  self = self.graph if hasattr(self, 'graph') else self
+  assert self._thread_local is not None
+  setattr(self._thread_local, name, value)
+
+
+def flush(graph=None, session=None):
+  graph = graph or get_default_graph()
+  results = []
+  if graph is None:
+    tf.logging.warn('tflex.flush called, but no default graph was set')
+    return results
+  while True:
+    host_callback = get_pending_host_call(graph=graph)
+    if host_callback is None:
+      break
+    if state.noisy:
+      tf.logging.info('Running host callback %s for session %s...', host_callback, session)
+    with with_graph(session.graph) as g:
+      with tflex.with_elapsed(lambda: host_callback(session=session)) as elapsed, value:
+        tf.logging.info('Finished host callback in %.2f: %s', pretty(value))
+        results.append(value)
+  return results
+
+
 class Dictator(dict):
   def __getattr__(self, k):
     try:

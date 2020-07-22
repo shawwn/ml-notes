@@ -285,7 +285,9 @@ def gpt2_input(params):
       tokens_var = tf.get_local_variable('tokens', dtype=tf.uint16, shape=[tokens_count])
     def sample_fn():
       return sample_text(tokens_var, amount=params['n_ctx'])
-    def init_fn(session=None):
+    def init_fn():
+      return tokens_var.initializer
+    def upload_fn(session=None):
       if session is None:
         session = tf.get_default_session()
       tf.logging.info('Loading %s tokens to TPU...', tflex.num(tokens_count))
