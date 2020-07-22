@@ -92,7 +92,7 @@ class TrainRunner(object):
       train_steps = iterations * int(math.ceil(train_steps / iterations))
     self.train_steps = train_steps
     self.input_graph = tf.Graph()
-    with tf.Graph() as self.init_graph:
+    with tf.Graph().as_default() as self.init_graph:
       self.tpu_init = tpu.initialize_system()
       self.tpu_shutdown = tpu.shutdown_system()
     #self.cluster_resolver = tflex.TPUClusterResolver(
