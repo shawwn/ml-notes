@@ -92,15 +92,17 @@ if __name__ == '__main__':
     with mock.patch.object(resolver.TPUClusterResolver, 'cluster_spec', cluster_spec):
       with mock.patch.object(resolver.TPUClusterResolver, '_fetch_cloud_tpu_metadata', _fetch_cloud_tpu_metadata):
         if len(sys.argv) <= 1:
-          res = resolver.TPUClusterResolver(os.environ['TPU_NAME'])
-          cluster = res.cluster_spec().as_cluster_def()
-          master = res.get_master()
-          print(master, cluster)
           from tensorflow.core.protobuf import config_pb2
           session_config = config_pb2.ConfigProto(allow_soft_placement=True, isolate_session_state=True)
-          cluster_spec = cluster.cluster_spec()
+          res = resolver.TPUClusterResolver(os.environ['TPU_NAME'])
+          cluster_spec = res.cluster_spec()
           if cluster_spec:
+            cluster = cluster_spec.as_cluster_def()
             session_config.cluster_def.CopyFrom(cluster_spec.as_cluster_def())
+          else:
+            cluster = None
+          master = res.get_master()
+          print(master, cluster)
           graph = tf.Graph()
           sess = tf.compat.v1.InteractiveSession(master, graph=graph, config=session_config)
           import pdb
