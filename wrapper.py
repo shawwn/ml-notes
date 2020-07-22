@@ -93,6 +93,8 @@ if __name__ == '__main__':
       with mock.patch.object(resolver.TPUClusterResolver, '_fetch_cloud_tpu_metadata', _fetch_cloud_tpu_metadata):
         if len(sys.argv) <= 1:
           from tensorflow.core.protobuf import config_pb2
+          import tensorflow as tf
+          import numpy as np
           session_config = config_pb2.ConfigProto(allow_soft_placement=True, isolate_session_state=True)
           res = resolver.TPUClusterResolver(os.environ['TPU_NAME'])
           cluster_spec = res.cluster_spec()
