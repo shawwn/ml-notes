@@ -94,8 +94,8 @@ class TrainRunner(object):
     self.input_graph = tf.Graph()
     tpu_init = [tpu.initialize_system()]
     self.tpu_shutdown = tpu.shutdown_system()
-    #self.cluster_resolver = tf.contrib.cluster_resolver.TPUClusterResolver(
-    self.cluster_resolver = tflex.TPUClusterResolver(
+    #self.cluster_resolver = tflex.TPUClusterResolver(
+    self.cluster_resolver = tf.contrib.cluster_resolver.TPUClusterResolver(
         FLAGS.tpu or FLAGS.master,
         zone=FLAGS.tpu_zone,
         project=FLAGS.gcp_project)
