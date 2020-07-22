@@ -1,6 +1,6 @@
 {
     "iterations": 20,
-    "batch_size_per_core": 1,
+    "batch_per_core": 1,
     "n_head": 25,
     "encoder_path": "gs://openwebtext/stuff/encoder",
     "n_vocab": 50257,

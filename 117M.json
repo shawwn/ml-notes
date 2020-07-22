@@ -1,6 +1,6 @@
 {
     "iterations": 50,
-    "batch_size_per_core": 1,
+    "batch_per_core": 1,
     "precision": "float32",
     "n_head": 12,
     "encoder_path": "encoder",
