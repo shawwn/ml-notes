@@ -88,10 +88,24 @@ if __name__ == '__main__':
   with mock.patch.object(resolver.TPUClusterResolver, 'master', mock_master):
     with mock.patch.object(resolver.TPUClusterResolver, 'cluster_spec', cluster_spec):
       with mock.patch.object(resolver.TPUClusterResolver, '_fetch_cloud_tpu_metadata', _fetch_cloud_tpu_metadata):
-        res = resolver.TPUClusterResolver(os.environ['TPU_NAME'])
-        spec = res.cluster_spec().as_cluster_def()
-        ip = res.get_master()
-        print(ip, spec)
-        sys.argv = sys.argv[1:]
-        exec(open(sys.argv[0]).read(), globals(), globals())
+        if len(sys.argv) <= 1:
+          res = resolver.TPUClusterResolver(os.environ['TPU_NAME'])
+          cluster = res.cluster_spec().as_cluster_def()
+          master = res.get_master()
+          print(master, cluster)
+          session_config = config_pb2.ConfigProto(allow_soft_placement=True, isolate_session_state=True)
+          cluster_spec = cluster.cluster_spec()
+          if cluster_spec:
+            session_config.cluster_def.CopyFrom(cluster_spec.as_cluster_def())
+          graph = tf.Graph()
+          sess = tf.compat.v1.InteractiveSession(master, graph=graph, config=session_config)
+          import pdb
+          pdb.set_trace()
+        else:
+          filename = sys.argv[1]
+          sys.argv = sys.argv[1:]
+          with open(filename) as f:
+            source = f.read()
+          code = compile(source, filename, 'exec')
+          exec(code, globals(), globals())
 
