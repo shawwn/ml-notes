@@ -104,16 +104,17 @@ fi
 ##gsutil -m rm -rf "${model_dir}"
 #
 
-tpu=tpu-euw4a-23
-export TPU_CORES=8
+export TPU_NAME="${TPU_NAME:-tpu-v3-128-euw4a-50}"
+export TPU_CORES=128
 params=117M.json
-model_dir=gs://danbooru-euw4a/checkpoint/test117m-79-mlp-sfw
-restore_dir=gs://danbooru-euw4a/models/117M
+model_dir=gs://danbooru-euw4a/runs/gpt-2/run0-117m-tensorflow
+restore_dir=gs://danbooru-euw4a/models/gpt-2/117M
 restore_trainable="--restore_trainable_variables true"
 #dataset="--dataset train.txt.tok16 --export_dataset datasets/train"
 #dataset="--dataset train.txt.tok16"
 #dataset="--dataset combined-pgpf-ftfy.txt.npz --export_dataset datasets/combined-pgpf-ftfy"
 #dataset="--dataset gs://danbooru-euw4a/datasets/combined-pgpf-ftfy/*.tfrecords"
+dataset="--dataset gs://dota-euw4a/data/tensorflow.tok16"
 
 if [ ! -z "$restore_dir" ]
 then
