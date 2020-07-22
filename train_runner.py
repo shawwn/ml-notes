@@ -92,8 +92,9 @@ class TrainRunner(object):
       train_steps = iterations * int(math.ceil(train_steps / iterations))
     self.train_steps = train_steps
     self.input_graph = tf.Graph()
-    tpu_init = [tpu.initialize_system()]
-    self.tpu_shutdown = tpu.shutdown_system()
+    with tf.Graph() as self.init_graph:
+      self.tpu_init = tpu.initialize_system()
+      self.tpu_shutdown = tpu.shutdown_system()
     #self.cluster_resolver = tflex.TPUClusterResolver(
     self.cluster_resolver = tf.contrib.cluster_resolver.TPUClusterResolver(
         FLAGS.tpu or FLAGS.master,
@@ -317,6 +318,9 @@ class TrainRunner(object):
       checkpoint_threads.append(None)
     end_step = self.cur_step + self.train_steps
     while self.cur_step < end_step:
+      tflex.flush(self.input_graph)
+      tflex.flush(self.init_graph)
+      tflex.flush(self.sess.graph)
       tflex.check_commands()
       if tflex.should_quit():
         tf.logging.info("TrainRunner: quitting")
