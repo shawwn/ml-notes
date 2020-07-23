@@ -198,7 +198,7 @@ class TrainRunner(object):
           self.cluster_resolver.get_master(),
           graph=self.input_graph,
           config=self.config)
-      self.input_sess.run(self.input_sess, self.dataset_initializer)
+      self.input_sess.run(self.dataset_initializer)
       tf.logging.info('Ensure infeed data has fully uploaded')
       tflex.flush(self.input_sess.graph)
       tf.logging.info('Run infeed session.run calls')
