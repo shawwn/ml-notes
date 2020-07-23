@@ -295,10 +295,10 @@ def gpt2_input(params):
     k = n // num_hosts
     i = current_host * k
     j = (current_host + 1) * k
-    tokens = tokens[i:j]
-    tf.logging.info("Shard %d/%d has %s tokens out of %s total", current_host, num_hosts, tflex.num(len(tokens)), tflex.num(tokens_count))
+    shard = tokens[i:j]
+    tf.logging.info("Shard %d/%d has %s tokens out of %s total", current_host, num_hosts, tflex.num(len(shard)), tflex.num(tokens_count))
     with tf.variable_scope('cpu%d' % current_host):
-      tokens_var = tf.get_local_variable('input_tokens', dtype=tf.uint16, shape=[tokens_count], use_resource=True)
+      tokens_var = tf.get_local_variable('input_tokens', dtype=tf.uint16, shape=[len(shard)], use_resource=True)
     def sample_fn():
       return sample_text(tokens_var, amount=params['n_ctx'], batch_size=batch_size)
     def init_fn():
@@ -306,10 +306,10 @@ def gpt2_input(params):
     def upload_fn(session=None):
       if session is None:
         session = tf.get_default_session()
-      tf.logging.info('Loading %s tokens to TPU...', tflex.num(tokens_count))
+      tf.logging.info('Loading %s tokens to TPU host %d...', tflex.num(len(shard)), current_host)
       assert session is not None
       with tflex.with_elapsed(tflex.assign_values, [tokens_var], [tokens], session=session) as (elapsed, result):
-        tf.logging.info('Loaded %s tokens to TPU in %.2fs', tflex.num(tokens_count), elapsed)
+        tf.logging.info('Loaded %s tokens to TPU host %d in %.2fs', tflex.num(len(shard)), current_host, elapsed)
     dset = tflex.make_dataset_function(sample_fn=sample_fn, init_fn=init_fn, upload_fn=upload_fn)
     return dset
   return dset
