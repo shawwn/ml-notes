@@ -596,9 +596,9 @@ def assign_values(variables, values, session=None, timeout_in_ms=600000):
   options = None
   if timeout_in_ms:
     options=config_pb2.RunOptions(timeout_in_ms=timeout_in_ms)
-  tf.logging.info('Loading %s elements to TPU: %s', num(element_count(variables)))
+  tf.logging.info('Loading %s elements to TPU', num(element_count(variables)))
   with with_elapsed(session.run, ops, vals, options=options) as elapsed, result:
-    tf.logging.info('Loaded %s elements to TPU in %.2fs: %s', num(element_count(variables)), elapsed)
+    tf.logging.info('Loaded %s elements to TPU in %.2fs', num(element_count(variables)), elapsed)
 
 def load_snapshot(ckpt, session=None, var_list=None, reshape=False):
   session = session or get_default_session()
