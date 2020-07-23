@@ -1653,16 +1653,19 @@ class DatasetFunctionIterator:
   def __init__(self, parent):
     self._parent = parent
     self.initializer = parent._init_fn()
+    add_pending_host_call(parent._upload_fn)
 
   def get_next(self):
     return self._parent._sample_fn()
 
 class DatasetFunction:
-  def __init__(self, sample_fn, init_fn, **kws):
+  def __init__(self, sample_fn, init_fn, upload_fn):
     self._sample_fn = sample_fn
     self._init_fn = init_fn
+    self._upload_fn = upload_fn
     assert callable(sample_fn)
     assert callable(init_fn)
+    assert callable(upload_fn)
 
   def make_initializable_iterator(self):
     return DatasetFunctionIterator(self)
