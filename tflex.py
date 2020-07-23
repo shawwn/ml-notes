@@ -575,10 +575,7 @@ def with_elapsed(thunk, *args, **kws):
   if thunk is not None:
     result = thunk(*args, **kws)
   elapsed = time.time() - start
-  if include_result:
-    yield elapsed, result
-  else:
-    yield elapsed
+  yield elapsed, result
 
 @contextmanager
 def on_elapsed(callback):
