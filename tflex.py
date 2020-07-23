@@ -1619,7 +1619,7 @@ def flush(graph=None, session=None):
     tf.logging.info('Running host callback %s for session %s...', host_callback, session)
     with with_graph(session.graph) as g:
       with with_elapsed(host_callback, session=session) as (elapsed, value):
-        tf.logging.info('Finished host callback in %.2f: %s', pretty(value))
+        tf.logging.info('Finished host callback in %.2f: %s', elapsed, pretty(value))
         results.append(value)
   return results
 
