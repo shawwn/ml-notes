@@ -319,9 +319,9 @@ class TrainRunner(object):
       checkpoint_threads.append(None)
     end_step = self.cur_step + self.train_steps
     while self.cur_step < end_step:
-      tflex.flush(self.input_graph)
-      tflex.flush(self.init_graph)
-      tflex.flush(self.sess.graph)
+      tflex.flush(self.input_graph, session=self.input_sess)
+      tflex.flush(self.init_graph, session=self.init_sess)
+      tflex.flush(self.sess.graph, session=self.sess)
       tflex.check_commands()
       if tflex.should_quit():
         tf.logging.info("TrainRunner: quitting")
