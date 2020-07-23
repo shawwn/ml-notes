@@ -10,7 +10,7 @@
     "beta1": 0.9,
     "beta2": 0.999,
     "epsilon": 1e-9,
-    "decay_type": "adam",
+    "decay_type": "none",
     "decay_exponent": 0.8,
     "opt_name": "adafactor",
     "train_batch_size": 512,

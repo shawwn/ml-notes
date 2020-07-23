@@ -37,6 +37,8 @@ def create_train_op(loss, params):
             decay_rate = adafactor_decay_rate_adam(params["beta2"])
         elif params["decay_type"] == "pow":
             decay_rate = adafactor_decay_rate_pow(params["decay_exponent"])
+        elif params["decay_type"] == "none":
+            decay_rate = None
         else:
             raise ValueError("unknown optimizer_adafactor_decay_type")
 
