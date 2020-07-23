@@ -111,7 +111,7 @@ class TrainRunner(object):
     self.init_sess = tf.Session(self.cluster_resolver.get_master(), graph=self.init_graph, config=self.config)
     tf.logging.info("TrainRunner: initializing TPU session...")
     if not bool(int(os.environ.get('TPU_NO_INIT', '0'))):
-      self.init_sess.run(self.tpu_init)
+      tflex.run(self.init_sess, self.tpu_init)
     tf.logging.info("TrainRunner: initializing TPU session (done)")
 
   def device_for_host(self, task=0, cpu=0):
@@ -198,9 +198,9 @@ class TrainRunner(object):
           self.cluster_resolver.get_master(),
           graph=self.input_graph,
           config=self.config)
-      self.input_sess.run(self.dataset_initializer)
+      tflex.run(self.input_sess, self.dataset_initializer)
       # Run infeed session.run calls
-      self.input_sess.run([self.enqueue_ops])
+      tflex.run(self.input_sess, [self.enqueue_ops])
 
     self.build_enqueue_ops(input_fn, params, 0)
 
@@ -261,7 +261,7 @@ class TrainRunner(object):
 
     # Build tpu train model session and initialize graph
     self.sess = tf.Session(self.cluster_resolver.get_master(), config=self.config)
-    self.sess.run(initializer)
+    tflex.run(self.sess, initializer)
 
     if FLAGS.restore_dir is not None:
       ckpt = tf.train.latest_checkpoint(FLAGS.restore_dir)
@@ -278,7 +278,7 @@ class TrainRunner(object):
           tf.logging.info('\t%s', repr(x))
         saver.restore(self.sess, ckpt)
         tf.logging.info('Restoring %s (done)', ckpt)
-    self.cur_step = self.sess.run(self.global_step)
+    self.cur_step = tflex.run(self.sess, self.global_step)
 
     # Complete infeed graph generation and session.run calls
     self.infeed_thread = threading.Thread(target=infeed_thread_fn, daemon=True)
@@ -314,14 +314,11 @@ class TrainRunner(object):
     checkpoint_threads = []
     need_final_checkpoint = False
     tf.logging.info("TrainRunner: step %d", self.cur_step)
-    #sess.run(self.global_step.initializer, dict([(self.global_step.initializer.inputs[1], self.cur_step)]))
+    #tflex.run(sess, self.global_step.initializer, dict([(self.global_step.initializer.inputs[1], self.cur_step)]))
     for i in range(num_threads):
       checkpoint_threads.append(None)
     end_step = self.cur_step + self.train_steps
     while self.cur_step < end_step:
-      tflex.flush(self.input_graph, session=self.input_sess)
-      tflex.flush(self.init_graph, session=self.init_sess)
-      tflex.flush(self.sess.graph, session=self.sess)
       tflex.check_commands()
       if tflex.should_quit():
         tf.logging.info("TrainRunner: quitting")
@@ -329,7 +326,7 @@ class TrainRunner(object):
       start = time.time()
       tf.logging.info("TrainRunner: start next %d steps", self.iterations)
       self.cur_step += self.iterations
-      loss = self.sess.run([self.loss])
+      loss = tflex.run(self.sess, [self.loss])
       thread = checkpoint_threads[thread_id]
       if checkpoint_threads[thread_id] is not None and checkpoint_threads[thread_id].is_alive():
         tf.logging.info("TrainRunner: checkpoint thread still active; skipping")
@@ -347,7 +344,7 @@ class TrainRunner(object):
         thread_id = 0
       end = time.time()
       tf.logging.info("TrainRunner: fetching global_step...")
-      gs = self.sess.run(self.global_step)
+      gs = tflex.run(self.sess, self.global_step)
       step_sec = end - start
       gs_sec = self.iterations / step_sec
       ex_sec = self.iterations * FLAGS.train_batch_size / (end - start)
@@ -406,6 +403,6 @@ class TrainRunner(object):
   def shutdown(self):
     tf.logging.info("TrainRunner: shutting down...")
     if not bool(int(os.environ.get('TPU_NO_INIT', '0'))):
-      self.init_sess.run(self.tpu_shutdown)
+      tflex.run(self.init_sess, self.tpu_shutdown)
       tf.logging.info("TrainRunner: shutting down (done)")
 

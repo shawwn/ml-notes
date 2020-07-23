@@ -1556,13 +1556,6 @@ def wrap_computation_in_while_loop(op_fn, n, parallel_iterations=1, as_callable=
       parallel_iterations=parallel_iterations)
 
 
-@contextmanager
-def with_flush(session=None, flush_session=True):
-  session = session or get_default_session()
-  if session is not None:
-    if flush_session:
-      flush(session)
-
 def get_pending_host_calls(graph=None):
   graph = graph or get_default_graph()
   if not hasattr(graph, 'pending_host_calls'):
@@ -1629,13 +1622,17 @@ def flush(graph=None, session=None):
     host_callback = get_pending_host_call(graph=graph)
     if host_callback is None:
       break
-    if state.noisy:
-      tf.logging.info('Running host callback %s for session %s...', host_callback, session)
+    tf.logging.info('Running host callback %s for session %s...', host_callback, session)
     with with_graph(session.graph) as g:
       with tflex.with_elapsed(host_callback, session=session) as elapsed, value:
         tf.logging.info('Finished host callback in %.2f: %s', pretty(value))
         results.append(value)
   return results
+
+
+def run(session, *args, **kws):
+  flush(session.graph, session)
+  return session.run(*args, **kws)
 
 
 class Dictator(dict):
