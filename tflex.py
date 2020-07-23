@@ -1647,7 +1647,6 @@ def flush(session=None):
 
 
 def run(session, *args, **kws):
-  flush(session.graph, session)
   return session.run(*args, **kws)
 
 
