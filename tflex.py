@@ -1623,20 +1623,20 @@ def flush(session=None):
   if session is None:
     tf.logging.warn('tflex.flush called, but no default session was set')
     return results
-  session.graph.switch_to_thread_local()
 
   host_callbacks = []
   while True:
     host_callback = get_pending_host_call(graph=session.graph)
     if host_callback is None:
       break
-    def host_fn():
-      with session.graph.as_default(), session.as_default():
-        value = host_callback(session=session)
-        results.append(value)
-    host_callbacks.append(host_fn)
+    host_callbacks.append(host_callback)
+  def host_fn(host_callback):
+    with session.graph.as_default(), session.as_default():
+      value = host_callback(session=session)
+      results.append(value)
   tf.logging.info('Running %d host callbacks %s for session %s...', len(host_callbacks), host_callbacks, session)
-  for i, thread in enumerate(parallelize(host_callbacks)):
+  session.graph.switch_to_thread_local()
+  for i, thread in enumerate(parallelize(host_callbacks, host_fn)):
     thread.join()
     tf.logging.info('Host callback %d of %d finished.', i, len(host_callbacks))
   # with with_graph(session.graph) as g:
