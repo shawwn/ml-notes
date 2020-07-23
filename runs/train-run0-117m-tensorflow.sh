@@ -13,9 +13,9 @@ export MODEL_DIR="$(printf '%s' "${MODEL_DIR}" | sed 's/\/$//')" # normalize mod
 export GIN_CONFIG="cfg/${RUN_NAME}.gin"
 
 
-export MODEL_NAME=117M
+export MODEL_NAME="${MODEL_NAME:-117M}"
 export DATASET="${DATASET:-gs://dota-euw4a/datasets/tensorflow.tok16}"
-export RESTORE_DIR=gs://dota-euw4a/models/gpt-2/${MODEL_NAME}
+export RESTORE_DIR="${RESTORE_DIR:-gs://dota-euw4a/models/gpt-2/${MODEL_NAME}}"
 
 
 
