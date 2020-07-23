@@ -467,7 +467,7 @@ class Session(tf.Session):
       print(self._spec, 'Session.run', *[pretty(x) for x in args], *[pretty(k)+'='+pretty(v) for k, v in kws.items()])
       if state.noisy_backtrace:
         print_backtrace()
-    with with_elapsed(super(Session, self).run, *args, **kws) as elapsed, result:
+    with with_elapsed(super(Session, self).run, *args, **kws) as (elapsed, result):
       if state.noisy:
         print(self._spec, 'Session.run (finished in %.2fs)' % elapsed, pretty(result), *[pretty(x) for x in args], *[pretty(k)+'='+pretty(v) for k, v in kws.items()])
         if state.noisy_backtrace:
@@ -577,12 +577,12 @@ def with_elapsed(thunk, *args, **kws):
   yield elapsed, result
 
 @contextmanager
-def on_elapsed(callback, *args, **kws):
+def on_elapsed(callback):
   start = time.time()
   result = yield
   if callback is not None:
     elapsed = time.time() - start
-    callback(*args, elapsed, **kws)
+    callback(elapsed)
   return result
 
 def assign_values(variables, values, session=None, timeout_in_ms=600000):
@@ -597,8 +597,8 @@ def assign_values(variables, values, session=None, timeout_in_ms=600000):
   if timeout_in_ms:
     options=config_pb2.RunOptions(timeout_in_ms=timeout_in_ms)
   tf.logging.info('Loading %s elements to TPU', num(element_count(variables)))
-  with on_elapsed(tf.logging.info, 'Loaded %s elements to TPU in %.2fs', num(element_count(variables))):
-    session.run(ops, vals, options=options)
+  with with_elapsed(session.run, ops, vals, options=options) as (elapsed, result):
+    tf.logging.info('Loaded %s elements to TPU in %.2fs', num(element_count(variables)), elapsed)
 
 def load_snapshot(ckpt, session=None, var_list=None, reshape=False):
   session = session or get_default_session()
@@ -1618,7 +1618,7 @@ def flush(graph=None, session=None):
       break
     tf.logging.info('Running host callback %s for session %s...', host_callback, session)
     with with_graph(session.graph) as g:
-      with with_elapsed(host_callback, session=session) as elapsed, value:
+      with with_elapsed(host_callback, session=session) as (elapsed, value):
         tf.logging.info('Finished host callback in %.2f: %s', pretty(value))
         results.append(value)
   return results

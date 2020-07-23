@@ -301,7 +301,7 @@ def gpt2_input(params):
         session = tf.get_default_session()
       tf.logging.info('Loading %s tokens to TPU...', tflex.num(tokens_count))
       assert session is not None
-      with tflex.with_elapsed(tflex.assign_values, [tokens_var], [tokens], session=session) as elapsed, result:
+      with tflex.with_elapsed(tflex.assign_values, [tokens_var], [tokens], session=session) as (elapsed, result):
         tf.logging.info('Loaded %s tokens to TPU in %.2fs', tflex.num(tokens_count), elapsed)
     dset = tflex.make_dataset_function(sample_fn=sample_fn, init_fn=init_fn, upload_fn=upload_fn)
     return dset
