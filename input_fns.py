@@ -138,7 +138,7 @@ def load_source_tokens(dataset, export_dataset=None, quit_after_exporting=True):
     tf.logging.info("Reading tokens from %s...", dataset)
     with tf.io.gfile.GFile(dataset, 'rb') as f:
       data = f.read()
-      tf.logging.info("len(data)=%s; np.frombuffer(data, dtype=np.uint16)...", len(data), dataset)
+      tf.logging.info("len(data)=%s; np.frombuffer(%s, dtype=np.uint16)...", len(data), repr(dataset))
       tokens = np.frombuffer(data, dtype=np.uint16)
   else:
     tf.logging.info("Loading tokens from %s...", dataset)
