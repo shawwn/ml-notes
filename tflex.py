@@ -1624,7 +1624,7 @@ def flush(graph=None, session=None):
       break
     tf.logging.info('Running host callback %s for session %s...', host_callback, session)
     with with_graph(session.graph) as g:
-      with tflex.with_elapsed(host_callback, session=session) as elapsed, value:
+      with with_elapsed(host_callback, session=session) as elapsed, value:
         tf.logging.info('Finished host callback in %.2f: %s', pretty(value))
         results.append(value)
   return results
