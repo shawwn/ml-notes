@@ -86,7 +86,7 @@ def sample_text(x, amount, batch_size=None):
     features = tf.stack(features)
     labels = tf.stack(labels)
     return features, labels
-  s = tf.size(x)
+  s = tf.size(x, out_type=tf.dtypes.int64)
   r = tf.random.uniform([], maxval=s-(amount+1), dtype=tf.dtypes.int64)
   r1 = tf.range(r, r+amount)
   r2 = tf.range(r+1, (r+1)+amount)
