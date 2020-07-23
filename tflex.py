@@ -270,7 +270,9 @@ def get_session_timeout_in_ms(timeout_in_ms=None):
     timeout_in_ms = state.timeout_in_ms
   return timeout_in_ms
 
-def init_tpu_config(name, host=None, timeout_in_ms=None):
+def init_tpu_config(name=None, host=None, timeout_in_ms=None):
+  if name is None:
+    name = os.environ['TPU_NAME']
   timeout_in_ms = get_session_timeout_in_ms(timeout_in_ms)
   cluster_resolver = TPUClusterResolver(name, host=host)
   config = tf.ConfigProto(operation_timeout_in_ms=timeout_in_ms,
@@ -1591,9 +1593,17 @@ def with_graph(graph=None, allow_mutations=True, make_graph_default=True, use_lo
     try:
       if make_graph_default:
         with graph.as_default():
-          result = yield graph
+          lock.release()
+          try:
+            result = yield graph
+          finally:
+            lock.acquire()
       else:
-        result = yield graph
+        lock.release()
+        try:
+          result = yield graph
+        finally:
+          lock.acquire()
       return result
     finally:
       if finalized:
@@ -1605,22 +1615,34 @@ def set_graph_local(self, name, value):
   assert self._thread_local is not None
   setattr(self._thread_local, name, value)
 
+import functools
 
-def flush(graph=None, session=None):
-  graph = graph or get_default_graph()
+def flush(session=None):
+  session = session or get_default_session()
   results = []
-  if graph is None:
-    tf.logging.warn('tflex.flush called, but no default graph was set')
+  if session is None:
+    tf.logging.warn('tflex.flush called, but no default session was set')
     return results
+  session.graph.switch_to_thread_local()
+
+  host_callbacks = []
   while True:
-    host_callback = get_pending_host_call(graph=graph)
+    host_callback = get_pending_host_call(graph=session.graph)
     if host_callback is None:
       break
-    tf.logging.info('Running host callback %s for session %s...', host_callback, session)
-    with with_graph(session.graph) as g:
-      with with_elapsed(host_callback, session=session) as (elapsed, value):
-        tf.logging.info('Finished host callback in %.2f: %s', elapsed, pretty(value))
+    def host_fn():
+      with session.graph.as_default(), session.as_default():
+        value = host_callback(session=session)
         results.append(value)
+    host_callbacks.append(host_fn)
+  tf.logging.info('Running %d host callbacks %s for session %s...', len(host_callbacks), host_callbacks, session)
+  for i, thread in enumerate(parallelize(host_callbacks)):
+    thread.join()
+    tf.logging.info('Host callback %d of %d finished.', i, len(host_callbacks))
+  # with with_graph(session.graph) as g:
+  #   with with_elapsed(host_callback, session=session) as (elapsed, value):
+  #     tf.logging.info('Finished host callback in %.2f: %s', elapsed, pretty(value))
+  #     results.append(value)
   return results
 
 

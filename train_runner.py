@@ -198,8 +198,10 @@ class TrainRunner(object):
           self.cluster_resolver.get_master(),
           graph=self.input_graph,
           config=self.config)
-      tflex.run(self.input_sess, self.dataset_initializer)
-      # Run infeed session.run calls
+      self.input_sess.run(self.input_sess, self.dataset_initializer)
+      tf.logging.info('Ensure infeed data has fully uploaded')
+      tflex.flush(self.input_sess.graph)
+      tf.logging.info('Run infeed session.run calls')
       tflex.run(self.input_sess, [self.enqueue_ops])
 
     self.build_enqueue_ops(input_fn, params, 0)
