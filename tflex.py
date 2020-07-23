@@ -572,8 +572,7 @@ from contextlib import contextmanager
 @contextmanager
 def with_elapsed(thunk, *args, **kws):
   start = time.time()
-  if thunk is not None:
-    result = thunk(*args, **kws)
+  result = thunk(*args, **kws)
   elapsed = time.time() - start
   yield elapsed, result
 
@@ -597,11 +596,9 @@ def assign_values(variables, values, session=None, timeout_in_ms=600000):
   options = None
   if timeout_in_ms:
     options=config_pb2.RunOptions(timeout_in_ms=timeout_in_ms)
-  if state.noisy:
-    tf.logging.info('Loading %s elements to TPU: %s', num(element_count(variables)))
+  tf.logging.info('Loading %s elements to TPU: %s', num(element_count(variables)))
   with with_elapsed(session.run, ops, vals, options=options) as elapsed, result:
-    if state.noisy:
-      tf.logging.info('Loaded %s elements to TPU in %.2fs: %s', num(element_count(variables)), elapsed)
+    tf.logging.info('Loaded %s elements to TPU in %.2fs: %s', num(element_count(variables)), elapsed)
 
 def load_snapshot(ckpt, session=None, var_list=None, reshape=False):
   session = session or get_default_session()
