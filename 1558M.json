@@ -8,6 +8,7 @@
     "lr": 0.00025,
     "warmup_steps": 0,
     "beta1": 0.0,
+    "decay_type": "adam",
     "decay_exponent": 0.8,
     "opt_name": "adafactor",
     "train_batch_size": 512,
