@@ -293,11 +293,11 @@ def gpt2_input(params):
     tokens_count = len(tokens)
     n = len(tokens)
     k = n // num_hosts
-    i = index * k
-    j = (index + 1) * k
+    i = current_host * k
+    j = (current_host + 1) * k
     tokens = tokens[i:j]
-    tf.logging.info("Shard %d/%d has %s tokens out of %s total", index, num_hosts, tflex.num(len(tokens)), tflex.num(tokens_count))
-    with tf.variable_scope('cpu%d' % index, reuse=tf.AUTO_REUSE):
+    tf.logging.info("Shard %d/%d has %s tokens out of %s total", current_host, num_hosts, tflex.num(len(tokens)), tflex.num(tokens_count))
+    with tf.variable_scope('cpu%d' % current_host):
       tokens_var = tf.get_local_variable('input_tokens', dtype=tf.uint16, shape=[tokens_count], use_resource=True)
     def sample_fn():
       return sample_text(tokens_var, amount=params['n_ctx'], batch_size=batch_size)
