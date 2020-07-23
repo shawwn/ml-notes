@@ -200,7 +200,7 @@ class TrainRunner(object):
           config=self.config)
       self.input_sess.run(self.dataset_initializer)
       tf.logging.info('Ensure infeed data has fully uploaded')
-      tflex.flush(self.input_sess.graph)
+      tflex.flush(self.input_sess)
       tf.logging.info('Run infeed session.run calls')
       tflex.run(self.input_sess, [self.enqueue_ops])
 
