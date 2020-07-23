@@ -577,12 +577,12 @@ def with_elapsed(thunk, *args, **kws):
   yield elapsed, result
 
 @contextmanager
-def on_elapsed(callback):
+def on_elapsed(callback, *args, **kws):
   start = time.time()
   result = yield
   if callback is not None:
     elapsed = time.time() - start
-    callback(elapsed)
+    callback(*args, elapsed, **kws)
   return result
 
 def assign_values(variables, values, session=None, timeout_in_ms=600000):
@@ -597,8 +597,8 @@ def assign_values(variables, values, session=None, timeout_in_ms=600000):
   if timeout_in_ms:
     options=config_pb2.RunOptions(timeout_in_ms=timeout_in_ms)
   tf.logging.info('Loading %s elements to TPU', num(element_count(variables)))
-  with with_elapsed(session.run, ops, vals, options=options) as elapsed, result:
-    tf.logging.info('Loaded %s elements to TPU in %.2fs', num(element_count(variables)), elapsed)
+  with on_elapsed(tf.logging.info, 'Loaded %s elements to TPU in %.2fs', num(element_count(variables)))
+    session.run(ops, vals, options=options)
 
 def load_snapshot(ckpt, session=None, var_list=None, reshape=False):
   session = session or get_default_session()
