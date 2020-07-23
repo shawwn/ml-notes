@@ -289,12 +289,12 @@ def gpt2_input(params):
   else:
     #dset = make_source_tokens(current_host, num_hosts, n_vocab=params['n_vocab'])
     all_tokens = get_source_tokens()
-    assert tokens.ndim == 1
-    n = len(tokens)
+    assert all_tokens.ndim == 1
+    n = len(all_tokens)
     k = n // num_hosts
     i = current_host * k
     j = (current_host + 1) * k
-    tokens = tokens[i:j]
+    tokens = all_tokens[i:j]
     tf.logging.info("Shard %d/%d has %s tokens out of %s total", current_host, num_hosts, tflex.num(len(tokens)), tflex.num(len(all_tokens)))
     with tf.variable_scope('cpu%d' % current_host):
       tokens_var = tf.get_local_variable('input_tokens', dtype=tf.uint16, shape=[len(tokens)], use_resource=True)
