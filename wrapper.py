@@ -47,6 +47,7 @@ def reroute(addr, host=None):
 
 class TPUClusterResolver(BaseTPUClusterResolver):
   def __init__(self, *args, host=None, node_count=None, node_offset=None, **kws):
+    kws['project'] = kws.pop('project', 'gpt-2-15b-poetry')
     super(TPUClusterResolver, self).__init__(*args, **kws)
     if host is None:
       host = _tpu_host()
@@ -123,7 +124,6 @@ def patch_tensorflow_interactive():
   patch.__enter__()
   return patch
 
-
 def interact():
     import code
     code.InteractiveConsole(locals=globals()).interact()
@@ -140,7 +140,7 @@ if __name__ == '__main__':
     cluster_spec = None
     cluster_def = None
     if 'TPU_NAME' in os.environ:
-      res = resolver.TPUClusterResolver(os.environ['TPU_NAME'])
+      res = TPUClusterResolver(os.environ['TPU_NAME'])
       master = res.get_master()
       cluster_spec = res.cluster_spec()
       if cluster_spec:
@@ -151,7 +151,7 @@ if __name__ == '__main__':
     devices = sess.list_devices()
     num_cores = len([x for x in devices if ':TPU:' in x.name])
     print(cluster_def)
-    print('ip: %s', master, num_cores)
+    print('cores: %d ip: %s' % (num_cores, master))
     r = sess.run
     from tensorflow.python.tpu import tpu as tpu_ops
     from tensorflow.compiler.tf2xla.python import xla
