@@ -146,6 +146,11 @@ if __name__ == '__main__':
       if cluster_spec:
         cluster_def = cluster_spec.as_cluster_def()
         session_config.cluster_def.CopyFrom(cluster_def)
+    elif 'TPU_IP' in os.environ:
+      master = os.environ['TPU_IP'].replace('grpc://', '')
+      if ':' not in master:
+        master = master + ':8470'
+      master = 'grpc://' + master
     graph = tf.Graph()
     sess = tf.compat.v1.InteractiveSession(master, graph=graph, config=session_config)
     devices = sess.list_devices()
