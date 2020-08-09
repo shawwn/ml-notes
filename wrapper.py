@@ -10,6 +10,7 @@ import sys
 import os
 import re
 import six
+import json
 from six.moves.urllib.error import URLError
 
 from tensorflow.python import framework
@@ -166,10 +167,25 @@ if __name__ == '__main__':
     from tensorflow.python.tpu import tpu_strategy_util
     from tensorflow.python.tpu import device_assignment as device_assignment_lib
     topology = None
+    topology_cache = {}
+    try:
+      with open('topology.cache', 'r') as f:
+        topology_cache = json.load(f)
+    except FileNotFoundError:
+      pass
+    def cached_topology(name=None):
+      if name is None:
+        name = os.environ['TPU_NAME']
+      return topology_cache.get(name)
+
     def get_topology():
       global topology
+      topology = cached_topology()
       if topology is None:
         topology = tpu_strategy_util.initialize_tpu_system(res)
+        topology_cache.update({os.environ['TPU_NAME']: topology._serialized})
+        with open('topology.cache', 'w') as f:
+          f.write(json.dumps(topology_cache))
       return topology
     def get_core_assignment(*core_ids):
       return device_assignment_lib.DeviceAssignment(get_topology(), [[topology.device_coordinates[0][i]] for i in core_ids])
