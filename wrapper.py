@@ -155,7 +155,7 @@ if __name__ == '__main__':
     graph = tf.Graph()
     sess = tf.compat.v1.InteractiveSession(master, graph=graph, config=session_config)
     devices = sess.list_devices()
-    cores = sorted([x for x in devices if ':TPU:' in x.name])
+    cores = sorted([x.name for x in devices if ':TPU:' in x.name])
     num_cores = len(cores)
     print(cluster_def)
     print('cores: %d ip: %s' % (num_cores, master))
