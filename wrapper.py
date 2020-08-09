@@ -167,7 +167,7 @@ if __name__ == '__main__':
     from tensorflow.compiler.tf2xla.ops import gen_xla_ops
     from tensorflow.python.tpu import tpu_strategy_util
     from tensorflow.python.tpu import device_assignment as device_assignment_lib
-    from tensorflow.python.tpu import topology
+    from tensorflow.python.tpu import topology as topology_lib
     tpu_topology = None
     topology_cache = {}
     try:
@@ -181,7 +181,7 @@ if __name__ == '__main__':
       result = topology_cache.get(name, None)
       if result is not None:
         serialized = base64.b64decode(result)
-        return topology.Topology(serialized=serialized)
+        return topology_lib.Topology(serialized=serialized)
     def get_topology():
       global tpu_topology
       tpu_topology = cached_topology()
@@ -191,8 +191,11 @@ if __name__ == '__main__':
         with open('topology.cache', 'w') as f:
           f.write(json.dumps(topology_cache))
       return tpu_topology
+    def get_task_and_cores_to_replicas():
+      return device_assignment_lib._compute_task_and_cores_to_replicas(tpu_topology.device_coordinates, tpu_topology)
     def get_core_assignment(*core_ids):
       return device_assignment_lib.DeviceAssignment(get_topology(), [[get_topology().device_coordinates[0][i]] for i in core_ids])
+    tpu_topology = cached_topology()
   else:
     filename = sys.argv[1]
     sys.argv = sys.argv[1:]
