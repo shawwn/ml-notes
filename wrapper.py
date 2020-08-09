@@ -185,7 +185,7 @@ if __name__ == '__main__':
       topology = cached_topology()
       if topology is None:
         topology = tpu_strategy_util.initialize_tpu_system(res)
-        topology_cache.update({os.environ['TPU_NAME']: base64.b64encode(topology_serialized).decode('utf8')})
+        topology_cache.update({os.environ['TPU_NAME']: base64.b64encode(topology.serialized()).decode('utf8')})
         with open('topology.cache', 'w') as f:
           f.write(json.dumps(topology_cache))
       return topology
