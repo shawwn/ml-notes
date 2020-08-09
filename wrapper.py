@@ -11,6 +11,7 @@ import os
 import re
 import six
 import json
+import base64
 from six.moves.urllib.error import URLError
 
 from tensorflow.python import framework
@@ -176,14 +177,15 @@ if __name__ == '__main__':
     def cached_topology(name=None):
       if name is None:
         name = os.environ['TPU_NAME']
-      return topology_cache.get(name)
-
+      result = topology_cache.get(name, None)
+      if result is not None:
+        return base64.b64decode(result)
     def get_topology():
       global topology
       topology = cached_topology()
       if topology is None:
         topology = tpu_strategy_util.initialize_tpu_system(res)
-        topology_cache.update({os.environ['TPU_NAME']: topology._serialized})
+        topology_cache.update({os.environ['TPU_NAME']: base64.b64encode(topology_serialized).decode('utf8'))})
         with open('topology.cache', 'w') as f:
           f.write(json.dumps(topology_cache))
       return topology
