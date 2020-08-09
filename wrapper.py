@@ -134,7 +134,8 @@ if __name__ == '__main__':
     from tensorflow.core.protobuf import config_pb2
     import tensorflow as tf
     import numpy as np
-    session_config = config_pb2.ConfigProto(allow_soft_placement=True, isolate_session_state=True)
+    #session_config = config_pb2.ConfigProto(allow_soft_placement=True, isolate_session_state=True)
+    session_config = config_pb2.ConfigProto(allow_soft_placement=True, isolate_session_state=False)
     master = None
     res = None
     cluster_spec = None
