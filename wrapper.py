@@ -165,10 +165,12 @@ if __name__ == '__main__':
     from tensorflow.compiler.tf2xla.ops import gen_xla_ops
     from tensorflow.python.tpu import tpu_strategy_util
     from tensorflow.python.tpu import device_assignment as device_assignment_lib
+    topology = None
     def get_topology():
       global topology
       if topology is None:
         topology = tpu_strategy_util.initialize_tpu_system(res)
+      return topology
     def get_core_assignment(*core_ids):
       return device_assignment_lib.DeviceAssignment(get_topology(), [[topology.device_coordinates[0][i]] for i in core_ids])
   else:
