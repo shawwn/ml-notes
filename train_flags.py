@@ -62,6 +62,10 @@ flags.DEFINE_string(
     help=('The file to read examples from'))
 
 flags.DEFINE_string(
+    'val_dataset', default=None,
+    help=('The file to read examples from for validation'))
+
+flags.DEFINE_string(
     'export_dataset', default=None,
     help=('Export the dataset as a .tfrecord file'))
 
@@ -127,6 +131,10 @@ flags.DEFINE_integer(
           ' train steps, the loop will exit before reaching'
           ' --iterations_per_loop. The larger this value is, the higher the'
           ' utilization on the TPU.'))
+
+flags.DEFINE_integer(
+    'loops_per_val_run', default=5,
+    help=(''))
 
 flags.DEFINE_integer(
     'num_parallel_calls', default=64,
