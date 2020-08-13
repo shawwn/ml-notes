@@ -322,9 +322,110 @@ sess.run(zz)
 
 
 # in infeed terminal:
+ids = [3, 7]
 ops = []
-for i in [3, 7]:
+for i in ids:
   ops.append(tpu_ops.tpu_ops.infeed_enqueue([tf.constant(i, tf.float32)], shape=[1], device_ordinal=i));
 
 
 sess.run(ops)
+
+
+
+
+def prn(x): print(x); return x
+
+
+def device_for_tpu_core(task=0, core=0, job="worker"):
+  return "/job:%s/task:%d/device:TPU_REPLICATED_CORE:%d" % (job, task, core)
+
+
+def device_for_host(task=0, cpu=0, job="worker"):
+  #return "/job:%s/task:%d/device:CPU:%d" % (job, task, cpu)
+  return "/job:%s/replica:0/task:%d/device:CPU:%d" % (job, task, cpu)
+
+
+def get_host_device_ids(device_assignment, job="worker"):
+  host_device_ids = set()
+  for replica_id in range(device_assignment.num_replicas):
+    host_device = device_assignment.host_device(replica=replica_id, logical_core=0, job=job)
+    # TODO(lehou): Get host_id in a better way.
+    host_id = int(host_device.split('/task:')[1].split('/device:')[0])
+    host_device_ids.add(host_id)
+  return host_device_ids
+
+
+def device_mapping(device_assignment, job='worker'):
+  for replica in range(device_assignment.num_replicas):
+    #for logical_core in range(device_assignment.num_cores_per_replica):
+    for logical_core in range(device_assignment.num_cores_per_replica):
+      #with tf.device(device_for_host(replica)):
+      host_device = device_assignment.host_device(replica=replica, logical_core=logical_core, job=job)
+      device_ordinal = device_assignment.tpu_ordinal(replica=replica, logical_core=logical_core)
+      yield host_device, device_ordinal, logical_core, replica
+
+
+def host_mapping(device_assignment, job='worker'):
+  for host_device, device_ordinal, logical_core, replica in device_mapping(device_assignment, job=job):
+    if logical_core == 0:
+      yield host_device, device_ordinal, replica
+
+
+# in terminal #1:
+
+
+#import tflex_tpu_device_assignment; import tflex_tpu_topology; topology = tflex_tpu_topology.get_topology(res); dev = tflex_tpu_device_assignment.device_assignment(tflex_tpu_topology.get_topology(res), [8,8,1], [1,1,1], 2)
+import tflex_tpu_device_assignment; import tflex_tpu_topology; topology = tflex_tpu_topology.get_topology(res); dev = tflex_tpu_device_assignment.spatial_partition(topology, 2)
+
+
+def op():
+  #with tf.device(dev.tpu_device(replica=0, job='worker')):
+  with tf.device(device_for_tpu_core()):
+    return tpu_ops.tpu_ops.infeed_dequeue(tf.float32, shape=(1,))
+
+
+#op2 = lambda x: tpu_ops.tpu_ops.collective_permute(op(x), [[0, 1], [1, 0]])
+#op2 = lambda x: tpu_ops.tpu_ops.collective_permute(x, [[0, 1], [1, 0], [2, 3], [3, 2], [4, 5], [5, 4], [6, 7], [7, 6]])
+
+
+#with tf.device(device_for_host()):
+with tf.device(dev.host_device(replica=0, job='worker')): zz = tpu_ops.shard(op, outputs_from_all_shards=True, num_shards=dev.num_replicas, inputs=[], device_assignment=dev); qq = sess.run(zz); print(qq)
+
+
+# in infeed terminal:
+ops = []
+for replica, logical_core, host_device, device_ordinal in device_mapping(dev):
+  if logical_core == 0:
+    print(replica, host_device, device_ordinal)
+    with tf.device(host_device):
+      ops.append(tpu_ops.tpu_ops.infeed_enqueue([tf.constant(replica, tf.float32)], shape=[1], device_ordinal=device_ordinal));
+
+sess.run(ops)
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Apply function (increments x_i) on elements for which a certain condition
+# apply (x_i != -1 in this example).
+x=tf.constant([0.1, -1., 5.2, 4.3, -1., 7.4])
+condition_mask=tf.not_equal(x,tf.constant(-1.))
+partitioned_data = tf.dynamic_partition(x, tf.cast(condition_mask, tf.int32) , 2)
+partitioned_data[1] = partitioned_data[1] + 1.0
+condition_indices = tf.dynamic_partition(tf.range(tf.shape(x)[0]), tf.cast(condition_mask, tf.int32) , 2)
+x = tf.dynamic_stitch(condition_indices, partitioned_data)
+# Here x=[1.1, -1., 6.2, 5.3, -1, 8.4], the -1. values remain
+# unchanged.
+
+
+
+
+tf.raw_ops.EmptyTensorList(element_shape=(1,), max_num_elements=1, element_dtype=tf.int32)
