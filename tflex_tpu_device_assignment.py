@@ -198,6 +198,103 @@ def _ring_2d(height, width):
   return ret
 
 
+def device_max_replicas(topology,
+                        computation_shape=None,
+                        computation_stride=None,
+                        num_replicas=1):
+  """Computes a device_assignment of a computation across a TPU topology.
+
+  Attempts to choose a compact grid of cores for locality.
+
+  Returns a `DeviceAssignment` that describes the cores in the topology assigned
+  to each core of each replica.
+
+  `computation_shape` and `computation_stride` values should be powers of 2 for
+  optimal packing.
+
+  Args:
+    topology: A `Topology` object that describes the TPU cluster topology.
+      To obtain a TPU topology, evaluate the `Tensor` returned by
+      `initialize_system` using `Session.run`. Either a serialized
+      `TopologyProto` or a `Topology` object may be passed. Note: you must
+      evaluate the `Tensor` first; you cannot pass an unevaluated `Tensor` here.
+    computation_shape: A rank 1 int32 numpy array with size equal to the
+      topology rank, describing the shape of the computation's block of cores.
+      If None, the `computation_shape` is `[1] * topology_rank`.
+    computation_stride: A rank 1 int32 numpy array of size `topology_rank`,
+      describing the inter-core spacing of the `computation_shape` cores in the
+      TPU topology. If None, the `computation_stride` is `[1] * topology_rank`.
+    num_replicas: The number of computation replicas to run. The replicas will
+      be packed into the free spaces of the topology.
+
+  Returns:
+    A DeviceAssignment object, which describes the mapping between the logical
+    cores in each computation replica and the physical cores in the TPU
+    topology.
+
+  Raises:
+    ValueError: If `topology` is not a valid `Topology` object.
+    ValueError: If `computation_shape` or `computation_stride` are not 1D int32
+      numpy arrays with shape [3] where all values are positive.
+    ValueError: If computation's replicas cannot fit into the TPU topology.
+  """
+  # Deserialize the Topology proto, if it is a string.
+  if isinstance(topology, bytes):
+    topology = Topology(serialized=topology)
+
+  if not isinstance(topology, Topology):
+    raise ValueError("`topology` is not a Topology object; got {}".format(
+        type(topology)))
+
+  topology_rank = len(topology.mesh_shape)
+  mesh_shape = topology.mesh_shape
+  if computation_shape is None:
+    computation_shape = np.array([1] * topology_rank, dtype=np.int32)
+  else:
+    computation_shape = np.asarray(computation_shape, dtype=np.int32)
+
+  if computation_stride is None:
+    computation_stride = np.array([1] * topology_rank, dtype=np.int32)
+  else:
+    computation_stride = np.asarray(computation_stride, dtype=np.int32)
+
+  if computation_shape.shape != (topology_rank,):
+    raise ValueError("computation_shape must have shape [{}]; got {}".format(
+        topology_rank, computation_shape.shape))
+  if computation_stride.shape != (topology_rank,):
+    raise ValueError("computation_stride must have shape [{}]; got {}".format(
+        topology_rank, computation_stride.shape))
+
+  if any(computation_shape < 1):
+    raise ValueError(
+        "computation_shape must be positive; got computation_shape={}".format(
+            computation_shape))
+  if any(computation_stride < 1):
+    raise ValueError(
+        "computation_stride must be positive; got computation_stride={}".format(
+            computation_stride))
+
+  # Computes the physical size of one computation instance.
+  computation_footprint = computation_shape * computation_stride
+  if any(computation_footprint > mesh_shape):
+    raise ValueError(
+        "computation footprint {} does not fit in TPU topology shape {}".format(
+            computation_footprint, mesh_shape))
+
+  # Computes how many copies of the computation footprint fit in the mesh.
+  block_counts = mesh_shape // computation_footprint
+
+  replica_counts = block_counts * computation_stride
+  max_replicas = np.prod(replica_counts)
+  if num_replicas > max_replicas:
+    raise ValueError(
+        "requested {} replicas but only {} replicas with shape {} and "
+        "computation_stride {} fit in a TPU mesh of shape {}".format(
+            num_replicas, max_replicas, computation_shape, computation_stride,
+            mesh_shape))
+  return max_replicas
+
+
 def device_assignment(topology,
                       computation_shape=None,
                       computation_stride=None,
