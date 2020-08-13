@@ -8,8 +8,9 @@ from tensorflow.compiler.tf2xla.ops import gen_xla_ops
 from tensorflow.python.tpu import tpu_strategy_util
 from tensorflow.python.tpu import device_assignment as device_assignment_lib
 from tensorflow.python.tpu import topology as topology_lib
-from tensorflow.contrib.cluster_resolver import TPUClusterResolver as BaseTPUClusterResolver
+#from tensorflow.contrib.cluster_resolver import TPUClusterResolver
 from tensorflow.python.tpu import tpu_system_metadata as tpu_system_metadata_lib
+from tflex import TPUClusterResolver
 
 
 _TOPOLOGY_CACHE_FILENAME = '.tpu_topology_cache.json'
@@ -41,7 +42,7 @@ def cached_topology(name=None):
 
 def get_cluster_resolver(cluster_resolver=None):
   if cluster_resolver is None:
-    cluster_resolver = BaseTPUClusterResolver(os.environ['TPU_NAME'])
+    cluster_resolver = TPUClusterResolver(os.environ['TPU_NAME'])
   return cluster_resolver
 
 
