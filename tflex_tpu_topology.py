@@ -8,6 +8,7 @@ from tensorflow.compiler.tf2xla.ops import gen_xla_ops
 from tensorflow.python.tpu import tpu_strategy_util
 from tensorflow.python.tpu import device_assignment as device_assignment_lib
 from tensorflow.python.tpu import topology as topology_lib
+from tensorflow.contrib.cluster_resolver import TPUClusterResolver as BaseTPUClusterResolver
 
 
 _TOPOLOGY_CACHE_FILENAME = '.tpu_topology_cache.json'
@@ -37,10 +38,12 @@ def cached_topology(name=None):
     return topology_lib.Topology(serialized=serialized)
 
 
-def get_topology():
+def get_topology(cluster_resolver=None):
   api.topology = cached_topology()
   if api.topology is None:
-    api.topology = tpu_strategy_util.initialize_tpu_system(res)
+    if cluster_resolver is None:
+      cluster_resolver = BaseTPUClusterResolver(os.environ['TPU_NAME'])
+    api.topology = tpu_strategy_util.initialize_tpu_system(cluster_resolver)
     api.topology_cache.update({os.environ['TPU_NAME']: base64.b64encode(api.topology.serialized()).decode('utf8')})
     with open(_TOPOLOGY_CACHE_FILENAME, 'w') as f:
       f.write(json.dumps(api.topology_cache))
