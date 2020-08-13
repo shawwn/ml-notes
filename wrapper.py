@@ -142,6 +142,8 @@ if __name__ == '__main__':
     res = None
     cluster_spec = None
     cluster_def = None
+    job_names = None
+    master_job = 'worker'
     if 'TPU_NAME' in os.environ:
       res = TPUClusterResolver(os.environ['TPU_NAME'])
       master = res.get_master()
@@ -149,6 +151,9 @@ if __name__ == '__main__':
       if cluster_spec:
         cluster_def = cluster_spec.as_cluster_def()
         session_config.cluster_def.CopyFrom(cluster_def)
+        job_names = set([job.name for job in cluster_def.job])
+        assert len(job_names) == 1
+        master_job = cluster_def.job[0].name
     elif 'TPU_IP' in os.environ:
       master = os.environ['TPU_IP'].replace('grpc://', '')
       if ':' not in master:
