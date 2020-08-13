@@ -2,7 +2,7 @@
 import re
 import time
 
-from google.cloud import storage
+from google.cloud import storage # sudo pip3 install google-cloud-storage
 
 import tensorflow as tf
 
