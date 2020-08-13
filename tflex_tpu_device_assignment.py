@@ -200,8 +200,7 @@ def _ring_2d(height, width):
 
 def device_max_replicas(topology,
                         computation_shape=None,
-                        computation_stride=None,
-                        num_replicas=1):
+                        computation_stride=None):
   """Computes a device_assignment of a computation across a TPU topology.
 
   Attempts to choose a compact grid of cores for locality.
@@ -298,7 +297,7 @@ def device_max_replicas(topology,
 def device_assignment(topology,
                       computation_shape=None,
                       computation_stride=None,
-                      num_replicas=1):
+                      num_replicas=None):
   """Computes a device_assignment of a computation across a TPU topology.
 
   Attempts to choose a compact grid of cores for locality.
@@ -383,6 +382,8 @@ def device_assignment(topology,
 
   replica_counts = block_counts * computation_stride
   max_replicas = np.prod(replica_counts)
+  if num_replicas is None:
+    num_replicas = max_replicas
   if num_replicas > max_replicas:
     raise ValueError(
         "requested {} replicas but only {} replicas with shape {} and "
@@ -514,3 +515,40 @@ def get_missing_devices(topology):
   return np.argwhere(topology_tasks < 0)
 
 
+def is_power_of_2(n):
+  return np.log2(128).is_integer()
+
+
+#>>> topology.mesh_shape
+#array([ 8, 16, 2], dtype=int32) # TPUv2-256
+#array([ 8, 8, 2], dtype=int32) # TPUv2-128
+#array([ 4, 4, 2], dtype=int32) # TPUv2-32
+#array([ 2, 2, 2], dtype=int32) # TPUv2-8
+
+
+def device_partition(topology, num_replicas):
+  if not is_power_of_2(num_replicas):
+    raise ValueError("Expected power of 2, got {}".format(num_replicas))
+  if len(topology.mesh_shape) != 3:
+    raise ValueError("Expected topology.mesh_shape to be rank 3, got rank {}".format(len(topology.mesh_shape)))
+  mesh_shape = topology.mesh_shape.copy()
+  num_cores = np.prod(mesh_shape)
+  i = 1
+  while num_replicas > 1:
+    mesh_shape[i] //= 2
+    assert mesh_shape[i] > 0
+    i = (i + 1) % 2
+    if mesh_shape[i] == 1:
+      i = 2
+    num_replicas //= 2
+  return mesh_shape
+
+
+def spatial_partition(topology, factor=1):
+  num_cores = np.prod(topology.mesh_shape)
+  if num_cores % factor != 0:
+    raise ValueError("Expected num_cores({}) to be divisible by factor({})".format(num_cores, factor))
+  num_replicas = num_cores // factor
+  computation_shape = device_partition(topology, num_replicas)
+  computation_stride = [1] * len(topology.mesh_shape)
+  return device_assignment(topology, computation_shape=computation_shape, computation_stride=computation_stride, num_replicas=num_replicas)
