@@ -533,7 +533,7 @@ def device_partition(topology, num_replicas):
     raise ValueError("Expected topology.mesh_shape to be rank 3, got rank {}".format(len(topology.mesh_shape)))
   mesh_shape = topology.mesh_shape.copy()
   num_cores = np.prod(mesh_shape)
-  i = 1
+  i = 0
   while num_replicas > 1:
     mesh_shape[i] //= 2
     assert mesh_shape[i] > 0
@@ -552,3 +552,21 @@ def spatial_partition(topology, factor=1):
   computation_shape = device_partition(topology, num_replicas)
   computation_stride = [1] * len(topology.mesh_shape)
   return device_assignment(topology, computation_shape=computation_shape, computation_stride=computation_stride, num_replicas=num_replicas)
+
+
+def device_mapping(device_assignment, job='worker'):
+  for replica in range(device_assignment.num_replicas):
+    #for logical_core in range(device_assignment.num_cores_per_replica):
+    for logical_core in range(device_assignment.num_cores_per_replica):
+      #with tf.device(device_for_host(replica)):
+      host_device = device_assignment.host_device(replica=replica, logical_core=logical_core, job=job)
+      device_ordinal = device_assignment.tpu_ordinal(replica=replica, logical_core=logical_core)
+      yield host_device, device_ordinal, logical_core, replica
+
+
+def host_mapping(device_assignment, job='worker'):
+  for host_device, device_ordinal, logical_core, replica in device_mapping(device_assignment, job=job):
+    if logical_core == 0:
+      yield host_device, device_ordinal, replica
+
+
