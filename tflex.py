@@ -1255,14 +1255,20 @@ def absolute_name_scope(scope):
 def absolute_variable_scope(scope, **kwargs):
     return tf.variable_scope(tf.VariableScope(name=scope, **kwargs), auxiliary_name_scope=False)
 
+def get_session_run_options(kws):
+  if 'options' not in kws and 'timeout' not in kws:
+    return None
+  if 'timeout' not in kws:
+    return kws.pop('options')
+  options = config_pb2.RunOptions()
+  if 'options' in kws:
+    options.MergeFrom(kws.pop('options'))
+  timeout = kws.pop('timeout')
+  options.timeout_in_ms = int(timeout * 1000.0)
+  return options
+
 def run(*args, **kws):
-  if 'timeout' in kws:
-    assert 'options' not in kws
-    timeout = kws.pop('timeout')
-    timeout_in_ms = int(timeout * 1000.0)
-    options = config_pb2.RunOptions(timeout_in_ms=timeout_in_ms)
-  else:
-    options = kws.pop('options') if 'options' in kws else None
+  options = get_session_run_options(kws)
   session = kws.pop('session') if 'session' in kws else None
   session = get_session(session)
   return session.run(*args, options=options, **kws)
@@ -1644,10 +1650,6 @@ def flush(session=None):
   #     tf.logging.info('Finished host callback in %.2f: %s', elapsed, pretty(value))
   #     results.append(value)
   return results
-
-
-def run(session, *args, **kws):
-  return session.run(*args, **kws)
 
 
 class Dictator(dict):
