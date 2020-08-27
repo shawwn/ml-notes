@@ -35,6 +35,8 @@ res2 = sess.partial_run(h, r2, feed_dict={c: res1}); res2
 
 
 
+import functools
+
 from tensorflow.python.client import session
 from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
@@ -333,13 +335,6 @@ sess.run(ops)
 
 
 
-def prn(x): print(x); return x
-
-
-def device_for_tpu_core(task=0, core=0, job="worker"):
-  return "/job:%s/task:%d/device:TPU_REPLICATED_CORE:%d" % (job, task, core)
-
-
 def device_for_host(task=0, cpu=0, job="worker"):
   #return "/job:%s/task:%d/device:CPU:%d" % (job, task, cpu)
   return "/job:%s/replica:0/task:%d/device:CPU:%d" % (job, task, cpu)
@@ -374,8 +369,62 @@ def host_mapping(device_assignment, job='worker'):
 # in terminal #1:
 
 
+
+def prn(x): print(x); return x
+
+
+def device_for_tpu_core(task=0, core=0, job="worker"):
+  return "/job:%s/task:%d/device:TPU_REPLICATED_CORE:%d" % (job, task, core)
+
 #import tflex_tpu_device_assignment; import tflex_tpu_topology; topology = tflex_tpu_topology.get_topology(res); dev = tflex_tpu_device_assignment.device_assignment(tflex_tpu_topology.get_topology(res), [8,8,1], [1,1,1], 2)
-import tflex_tpu_device_assignment; import tflex_tpu_topology; topology = tflex_tpu_topology.get_topology(res); dev = tflex_tpu_device_assignment.spatial_partition(topology, 2)
+import tflex_tpu_device_assignment; import tflex_tpu_topology; topology = tflex_tpu_topology.get_topology(res); dev = tflex_tpu_device_assignment.spatial_partition(topology, 4)
+
+
+def alloc_op(gb=None):
+  if gb is None:
+    gb = 7 * dev.num_cores_per_replica
+  def op():
+    #with tf.device(dev.tpu_device(replica=0, job='worker')):
+    vs = []
+    rs = []
+    num_cores = dev.num_cores_per_replica
+    with tf.variable_scope('', reuse=tf.AUTO_REUSE):
+      for i in range(gb):
+        core = i % num_cores
+        with tf.device(device_for_tpu_core(core=core)):
+          v = tf.get_local_variable('alloc_%dgb_%d' % (gb, i), shape=(16,1024,128,128), dtype=tf.float32, initializer=tf.ones_initializer())
+          vs.append(v)
+          r = tf.reduce_sum(v)
+          rs.append(r)
+      with tf.device(device_for_tpu_core()):
+        #return tpu_ops.tpu_ops.infeed_dequeue(tf.float32, shape=(1,))
+        #return tf.reduce_sum(v)
+        #r = tf.add_n([tf.reduce_sum(v) for v in vs])
+        r = tf.add_n(rs)
+        print(r)
+        return r
+  return op
+
+import time
+
+zz = tpu_ops.shard(alloc_op(), outputs_from_all_shards=True, num_shards=dev.num_replicas, inputs=[], device_assignment=dev)
+#sess.run(tf.tpu.initialize_system())
+sess.run([tf.global_variables_initializer(), tf.local_variables_initializer()]); 
+now = time.time(); qq = sess.run(zz); elapsed = time.time() - now; print(qq); print(elapsed, 'seconds')
+
+
+gb = 8
+
+with tf.device(dev.tpu_device(0, 0)), tf.variable_scope('', reuse=tf.AUTO_REUSE):
+  v = tf.get_local_variable('alloc_%dgb' % gb, shape=((gb*1024)//4,1024,1024), dtype=tf.float32, initializer=tf.ones_initializer())
+  op = tf.reduce_sum(v)
+
+sess.run([tf.global_variables_initializer(), tf.local_variables_initializer()]); 
+
+with tf.device(dev.host_device(replica=0, job='worker')): zz = tpu_ops.shard(alloc_op(), outputs_from_all_shards=True, num_shards=dev.num_replicas, inputs=[], device_assignment=dev); qq = sess.run(zz); print(qq)
+
+with tf.device(dev.host_device(replica=0, job='worker')): zz = tpu_ops.shard(alloc_op(), outputs_from_all_shards=True, num_shards=dev.num_replicas, inputs=[], device_assignment=dev); qq = sess.run(zz); print(qq)
+
 
 
 def op():
@@ -429,3 +478,304 @@ x = tf.dynamic_stitch(condition_indices, partitioned_data)
 
 
 tf.raw_ops.EmptyTensorList(element_shape=(1,), max_num_elements=1, element_dtype=tf.int32)
+
+
+
+@tf.custom_gradient
+def log1pexp(x):
+  e = tf.exp(x)
+  def grad(dy):
+    return dy * (1 - 1 / (1 + e))
+  return tf.math.log(1 + e), grad
+
+
+# x = tf.constant(100.)
+# y = log1pexp(x)
+# dy = tf.gradients(y, x) # Will be NaN when evaluated.
+
+
+
+
+
+
+
+
+
+
+# simple example of outfeed enqueue/dequeue
+
+enq = tpu.shard(lambda: tpu_ops.outfeed_enqueue_tuple([tf.constant([1], dtype=tf.int32)]), num_shards=8)
+
+deq = [tpu_ops.outfeed_dequeue_tuple(dtypes=[tf.int32], shapes=[[1]], device_ordinal=i) for i in range(8)]
+
+
+
+# pipeline
+
+
+
+def tf_id():
+  # TODO(iamtingchen): more elegant way to convert u32 to s32 for replica_id.
+  replica_id = tf.cast(tf.cast(xla.replica_id(), tf.uint32), tf.int32)
+  return replica_id
+
+def tf_tpu_cpu(f, *args, **kws):
+  return tpu.outside_compilation(f, *args, **kws)
+
+def tf_now():
+  return tf_tpu_cpu(lambda: tf.timestamp())
+
+def tf_get(k):
+  return tf_tpu_cpu(lambda: table.lookup(k))
+
+#def tf_reenqueue(
+
+def testify(x):
+  def testifying(*args):
+    if len(args) == 0:
+      return x
+    else:
+      y = args[0]
+      if x == y:
+        return x
+  return testifying
+
+def count_tpu_cores(session=None):
+  session = session or tf.get_default_session()
+  return len([x for x in session.list_devices() if ':TPU:' in x.name])
+
+from tensorflow.python.tpu import tpu
+from tensorflow.python.tpu.ops import tpu_ops
+
+def count_replica_cores():
+  return 8
+
+def tf_now():
+  return tf.cast(tf_tpu_cpu(lambda: tf.identity(tf.timestamp(), name="timestamp")), tf.float32)
+
+def tf_elapsed(since):
+  result = tf_tpu_cpu(lambda x: tf.identity(tf.timestamp() - tf.cast(x, tf.float64), name="timestamp"),
+      since)
+  return tf.cast(result, tf.tloat32)
+
+def tf_replica_id():
+  # TODO(iamtingchen): more elegant way to convert u32 to s32 for replica_id.
+  return tf.cast(tf.cast(xla.replica_id(), tf.uint32), tf.int32)
+
+def shapesof(values, shapes=None):
+  return shapes or [x.shape.as_list() for x in values]
+
+# def tf_infeed_enqueue_tuple_from_core(values, shapes=None):
+#   shapes = shapesof(values, shapes)
+#   replica_id = tf_replica_id()
+#   def on_cpu(core_id, values, shapes):
+#     def case(i):
+#       return lambda: tpu_ops.infeed_enqueue_tuple(values, shapes, device_ordinal=i) 
+#     return tf.switch_case(core_id, [case(i) for i in range(count_replica_cores())])
+#   return tpu.outside_compilation(on_cpu, replica_id, values, shapes)
+
+def tf_infeed_enqueue_tuple_from_core(values, shapes=None):
+  shapes = shapesof(values, shapes)
+  replica_id = tf_replica_id()
+  def on_cpu(core_id, values, shapes):
+    def case(i):
+      return lambda: tpu_ops.infeed_enqueue_tuple(values, shapes, device_ordinal=i) 
+    return tf.switch_case(core_id, [case(i) for i in range(count_replica_cores())])
+  return tpu.outside_compilation(on_cpu, replica_id, values, shapes)
+
+def tpu_shard(op, num_shards=None, **kws):
+  if num_shards is None:
+    num_shards = count_replica_cores()
+  return tpu.shard(op, num_shards=num_shards, **kws)
+
+def on_core():
+  start_time, i, token = tpu_ops.infeed_dequeue_tuple([tf.float32, tf.int64, tf.int64], shapes=[(1,), (1,), (1,)])
+  now = tf_now()
+  elapsed = now - start_time
+  with tf.control_dependencies([tpu_ops.outfeed_enqueue_tuple([start_time, i, token])]):
+    result = tf.identity(token * token)
+    values = [now, i, result]
+    reup = tf_infeed_enqueue_tuple_from_core(values, shapes=[(1,), (1,), (1,)])
+    with tf.control_dependencies([reup]):
+      return [i, replica_id, result]
+
+def on_core():
+  when, i, value = tpu_ops.infeed_dequeue_tuple([tf.float32, tf.int64, tf.int64], shapes=[(1,), (1,), (1,)])
+  now = tf_now()
+  elapsed = now - when
+  values = [now, i + 1, value * value]
+  reup = tf_infeed_enqueue_tuple_from_core(values, shapes=[(1,), (1,), (1,)])
+
+
+# def tf_now():
+#   return tf.cast(tf_tpu_cpu(lambda: tf.identity(tf.timestamp(), name="timestamp")), tf.float32)
+
+# def tf_elapsed(since):
+#   result = tf_tpu_cpu(lambda x: tf.identity(tf.timestamp() - tf.cast(x, tf.float64), name="timestamp"),
+#       since)
+#   return tf.cast(result, tf.tloat32)
+
+
+# somehow this makes a persistent clock.
+
+def kickstart():
+  ops = [tpu_ops.infeed_enqueue_tuple([tf_now()], shapes=[()], device_ordinal=i) for i in range(count_replica_cores())]
+  return ops
+
+def on_core():
+  start_time, = tpu_ops.infeed_dequeue_tuple([tf.float32], shapes=[(1,)])
+  with tf.control_dependencies([start_time]):
+    # elapsed = tf_elapsed(start_time)
+    now = tf.cast(tf_now(), tf.float32)
+    # #refeed = tf_infeed_enqueue_tuple_from_core([now])
+    # # with tf.control_dependencies([refeed]):
+    # #   return [elapsed, now]
+    #return [elapsed, now]
+    return [start_time, now]
+
+core_op = tpu_shard(on_core)
+
+def dequeue():
+  return tpu_ops.infeed_dequeue_tuple([tf.float32], shapes=[(1,)])
+
+deq = tpu_shard(dequeue)
+
+kick = kickstart()
+
+
+from tensorflow.python.ops import data_flow_ops
+
+# fails
+s = data_flow_ops.StagingArea([tf.float64])
+def on_core():
+  return s.get()
+
+# fails
+def on_core():
+  s = data_flow_ops.StagingArea([tf.float64])
+  return s.get()
+
+
+s = data_flow_ops.StagingArea([tf.float64])
+
+def on_core():
+  v = tf_tpu_cpu(lambda: globals()['s'].get())
+  return v
+
+core_op = tpu_shard(on_core)
+
+
+
+def feed_cores(dtype, shape=[]):
+  num_cores = count_replica_cores()
+  values_IN = tf.placeholder(dtype, [num_cores] + shape, name='infeed_enqueue_values_IN')
+  ops = []
+  for i in range(num_cores):
+    index = tf.constant(i, tf.int64)
+    #value = tf.cast(values_IN[i], tf.int32)
+    value = values_IN[i]
+    shapes = [index.shape.as_list(), value.shape.as_list()]
+    values = [index, value]
+    op = tpu_ops.infeed_enqueue_tuple(values, shapes=shapes, device_ordinal=i)
+    ops.append(op)
+  return values_IN, ops
+
+values_IN, feed_op = feed_cores(tf.int32)
+
+sess.run(feed_op, {values_IN: [i for i in range(count_replica_cores())]})
+
+# def feed_cores():
+#   num_cores = count_tpu_cores()
+#   #assert isinstance(values, (list, tuple))
+#   #assert len(values) % num_cores == 0
+#   values_IN = tf.placeholder(tf.int32, [num_cores], name='infeed_enqueue_values_IN')
+#   op = [tpu_ops.infeed_enqueue_tuple([tf.constant(i, tf.int64), tf.cast(values_IN[i], tf.int32)], shapes=[(), ()], device_ordinal=i) for i in range(num_cores)]
+#   return values_IN, op
+
+# values_IN, feed_op = feed_cores()
+
+
+# def run_cores(on_core_fn);
+#   op = tpu_shard(on_core_fn)
+#   stop = False
+#   def core_thunk():
+#     while not stop:
+#       sess.run(op)
+
+
+
+import threading
+
+# threading.Thread(target=
+
+
+
+enq = tpu.shard(lambda: tpu_ops.outfeed_enqueue_tuple([tf.constant([1], dtype=tf.int32)]), num_shards=8)
+
+deq = [tpu_ops.outfeed_dequeue_tuple(dtypes=[tf.int32], shapes=[[1]], device_ordinal=i) for i in range(8)]
+
+
+
+# How to get a TPU's physical ID
+
+from tensorflow.python.framework import errors_impl
+
+def clone_session(session=None, graph=None, interactive=False, **kws):
+  if session is None:
+    session = tf.get_default_session()
+  if graph is None:
+    graph = session.graph
+  config = session._config # is there a better way to do this?
+  master = session.sess_str # is there a better way to do this?
+  Session = (tf.compat.v1.InteractiveSession if interactive else tf.Session)
+  return Session(master, graph=graph, config=config)
+
+def get_tpu_id(session=None):
+  if session is None:
+    session = tf.get_default_session()
+  try:
+    with tf.Graph().as_default() as graph, clone_session(graph=graph) as throwaway_session:
+      throwaway_session.run(gen_memory_stats_ops.bytes_in_use())
+  except errors_impl.NotFoundError as e:
+    return e.message.split(' in binary running on ')[-1].split('. ')[0]
+
+
+from tensorflow.python.framework import device as pydev
+
+
+
+class FakeOp(object):
+  """A helper class to determine the current device.
+
+  Supports only the type and device set/get methods needed to run the
+  graph's _apply_device_function method.
+  """
+
+  def __init__(self):
+    self._device = ""
+
+  @property
+  def type(self):
+    return "FakeOp"
+
+  @property
+  def device(self):
+    return self._device
+
+  def _set_device(self, device):
+    if isinstance(device, pydev.DeviceSpec):
+      self._device = device.to_string()
+    else:
+      self._device = device
+
+  def _set_device_from_string(self, device_str):
+    self._device = device_str
+
+
+def tf_determine_current_device_op(graph=None):
+  if graph is None:
+    graph = tf.get_default_graph()
+  fake_op = FakeOp()
+  graph._apply_device_functions(fake_op)  # pylint: disable=protected-access
+  device = pydev.DeviceSpec.from_string(fake_op.device)
+  
