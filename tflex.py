@@ -1267,9 +1267,8 @@ def get_session_run_options(kws):
   options.timeout_in_ms = int(timeout * 1000.0)
   return options
 
-def run(*args, **kws):
+def run(session, *args, **kws):
   options = get_session_run_options(kws)
-  session = kws.pop('session') if 'session' in kws else None
   session = get_session(session)
   return session.run(*args, options=options, **kws)
 
