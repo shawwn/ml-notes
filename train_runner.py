@@ -268,18 +268,19 @@ class TrainRunner(object):
     if FLAGS.restore_dir is not None:
       ckpt = tf.train.latest_checkpoint(FLAGS.restore_dir)
       if ckpt is not None:
+        step = tflex.checkpoint_step(ckpt) or 0
         if FLAGS.restore_trainable_variables:
           var_list = tf.trainable_variables()
-          if params['n_ctx'] != 1024:
-            var_list = [x for x in var_list if '/wpe' not in x.name]
         else:
           var_list = tf.global_variables()
         saver = tf.train.Saver(var_list=var_list, restore_sequentially=True)
-        tf.logging.info('Restoring %s', ckpt)
         for x in var_list:
           tf.logging.info('\t%s', repr(x))
+        tf.logging.info('Restoring %s step %d', ckpt, step)
         saver.restore(self.sess, ckpt)
-        tf.logging.info('Restoring %s (done)', ckpt)
+        tf.logging.info('Setting step %d', step)
+        self.global_step.load(step)
+        tf.logging.info('Restoring %s step %d (done)', ckpt, step)
     self.cur_step = tflex.run(self.sess, self.global_step)
 
     # Complete infeed graph generation and session.run calls

@@ -504,6 +504,13 @@ def latest_checkpoint(checkpoint_dir, latest_filename=None):
   ctr = ctrs.max()
   return os.path.join(checkpoint_dir, 'model-{}').format(ctr)
 
+def checkpoint_step(ckpt):
+  found = re.findall('-([0-9]+)$', ckpt)
+  if len(found) > 0:
+    assert len(found) == 1
+    step = int(found[0])
+    return step
+
 def truncate_value(variable, value, reshape=True):
   if not reshape:
     return value

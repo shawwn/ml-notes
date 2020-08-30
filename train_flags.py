@@ -50,7 +50,7 @@ flags.DEFINE_string(
     help=('The directory where the model should be restored from'))
 
 flags.DEFINE_bool(
-    'restore_trainable_variables', default=False,
+    'restore_trainable_variables', default=True,
     help=('Only restore trainable variables'))
 
 flags.DEFINE_string(
