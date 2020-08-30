@@ -8,7 +8,7 @@ export RUN_ID="${RUN_ID:-a}"
 export RUN_NAME="${RUN_NAME:-chessrun00}"
 export RUN_DESC="${RUN_DESC:-117M test run}"
 tmux-set-title "${RUN_NAME}/${RUN_ID} ${TPU_NAME}"
-export MODEL_DIR="${MODEL_DIR:-gs://dota-euw4a/runs/gpt-2/${RUN_NAME}/${RUN_ID}/}"
+export MODEL_DIR="${MODEL_DIR:-gs://tpu-usc1/runs/gpt-2/${RUN_NAME}/${RUN_ID}/}"
 export MODEL_DIR="$(printf '%s' "${MODEL_DIR}" | sed 's/\/$//')" # normalize model dir; ensure it does *not* end with a slash
 export GIN_CONFIG="cfg/${RUN_NAME}.gin"
 
