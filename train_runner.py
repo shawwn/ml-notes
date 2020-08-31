@@ -26,6 +26,7 @@ import os
 from absl import flags
 import tensorflow as tf
 import tflex
+import tqdm
 
 from tensorflow.contrib import tpu
 from tensorflow.contrib.tpu.python.tpu import tpu_function
@@ -173,7 +174,7 @@ class TrainRunner(object):
         self.enqueue_ops.append(
             wrap_computation_in_while_loop(
                 get_enqueue_ops_fn(),
-                n=self.train_steps,
+                n=self.iterations,
                 parallel_iterations=1))
 
   def initialize(self, input_fn, model_fn, params):
@@ -192,22 +193,21 @@ class TrainRunner(object):
 
     def infeed_thread_fn():
       """Build and infeed session.run calls in a background thread."""
-      i = 1
-      while i < FLAGS.num_cores // FLAGS.tpu_cores_per_host:
-        self.build_enqueue_ops(input_fn, params, i)
-        i += 1
-      # Build infeed sesssion
-      self.input_sess = tf.Session(
-          self.cluster_resolver.get_master(),
-          graph=self.input_graph,
-          config=self.config)
-      self.input_sess.run(self.dataset_initializer)
-      tf.logging.info('Ensure infeed data has fully uploaded')
-      tflex.flush(self.input_sess)
       tf.logging.info('Run infeed session.run calls')
       tflex.run(self.input_sess, [self.enqueue_ops])
+      tf.logging.info('infeed session.run finished')
 
-    self.build_enqueue_ops(input_fn, params, 0)
+    for i in tqdm.trange(FLAGS.num_cores // FLAGS.tpu_cores_per_host):
+      self.build_enqueue_ops(input_fn, params, i)
+
+    # Build infeed sesssion
+    self.input_sess = tf.Session(
+        self.cluster_resolver.get_master(),
+        graph=self.input_graph,
+        config=self.config)
+    self.input_sess.run(self.dataset_initializer)
+    tf.logging.info('Ensure infeed data has fully uploaded')
+    tflex.flush(self.input_sess)
 
     def get_tpu_step(mparams):
       """Get the TPU graph generation function."""
@@ -290,8 +290,11 @@ class TrainRunner(object):
     self.cur_step = tflex.run(self.sess, self.global_step)
 
     # Complete infeed graph generation and session.run calls
-    self.infeed_thread = threading.Thread(target=infeed_thread_fn, daemon=True)
+    def null_fn():
+      pass
+    self.infeed_thread = threading.Thread(target=null_fn, daemon=True)
     self.infeed_thread.start()
+    self.infeed_thread_fn = infeed_thread_fn
 
   def train(self, num_threads=1, output_summaries=True):
     """Run the Train steps on the TPU device.
@@ -335,6 +338,7 @@ class TrainRunner(object):
       start = time.time()
       tf.logging.info("TrainRunner: start next %d steps", self.iterations)
       self.cur_step += self.iterations
+      self.infeed_thread_fn()
       loss = tflex.run(self.sess, [self.loss])
       thread = checkpoint_threads[thread_id]
       if checkpoint_threads[thread_id] is not None and checkpoint_threads[thread_id].is_alive():
