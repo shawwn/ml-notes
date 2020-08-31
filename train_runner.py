@@ -277,7 +277,7 @@ class TrainRunner(object):
       if ckpt is not None:
         step = tflex.checkpoint_step(ckpt) or 0
         saver = tf.train.Saver(var_list=self.var_list, restore_sequentially=True)
-        for x in var_list:
+        for x in self.var_list:
           tf.logging.info('\t%s', repr(x))
         tf.logging.info('Restoring %s step %d', ckpt, step)
         saver.restore(self.sess, ckpt)
@@ -305,12 +305,12 @@ class TrainRunner(object):
 
     def checkpoint_thread_fn(saver, sess):
       step = self.cur_step
-      path = FLAGS.model_dir + "/model.ckpt-%d" % step
-      tf.logging.info('step %d: Saving checkpoint %s...', step, path)
+      path = FLAGS.model_dir + "/model.ckpt"
+      tf.logging.info('step %d: Saving checkpoint %s-%d...', step, path, step)
       now = time.time()
       saver.save(sess, path, write_meta_graph=False, global_step=step)
       elapsed = time.time() - now
-      tf.logging.info('step %d: Saved checkpoint %s in %.2fs', step, path, elapsed)
+      tf.logging.info('step %d: Saved checkpoint %s-%d in %.2fs', step, path, step, elapsed)
 
     @tflex.register_command
     def save():
