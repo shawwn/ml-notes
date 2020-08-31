@@ -272,10 +272,11 @@ class TrainRunner(object):
     self.sess = tf.Session(self.cluster_resolver.get_master(), config=self.config)
     tflex.run(self.sess, initializer)
 
-    if FLAGS.restore_dir is not None and not FLAGS.fresh:
+    if FLAGS.restore_dir is not None:
       ckpt = tf.train.latest_checkpoint(FLAGS.restore_dir)
       if ckpt is None:
-        raise ValueError("restore_dir has no latest_checkpoint: %s" % repr(FLAGS.restore_dir))
+        #raise ValueError("restore_dir has no latest_checkpoint: %s" % repr(FLAGS.restore_dir))
+        pass
       else:
         step = tflex.checkpoint_step(ckpt) or 0
         saver = tf.train.Saver(var_list=self.var_list, restore_sequentially=True)
