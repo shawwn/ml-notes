@@ -274,7 +274,9 @@ class TrainRunner(object):
 
     if FLAGS.restore_dir is not None:
       ckpt = tf.train.latest_checkpoint(FLAGS.restore_dir)
-      if ckpt is not None:
+      if ckpt is None:
+        raise ValueError("restore_dir has no latest_checkpoint: %s" % repr(FLAGS.restore_dir))
+      else:
         step = tflex.checkpoint_step(ckpt) or 0
         saver = tf.train.Saver(var_list=self.var_list, restore_sequentially=True)
         for x in self.var_list:
