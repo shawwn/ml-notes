@@ -15,19 +15,19 @@ export GIN_CONFIG="cfg/${RUN_NAME}.gin"
 
 export MODEL_NAME="${MODEL_NAME:-chess}"
 export DATASET="${DATASET:-gs://tpu-usc1/datasets/chess/kingbase2019gpt-5g.txt.tok16}"
-export RESTORE_DIR="${RESTORE_DIR:-gs://tpu-usc1/models/gpt-2/${MODEL_NAME}}"
+#export RESTORE_DIR="${RESTORE_DIR:-gs://tpu-usc1/models/gpt-2/${MODEL_NAME}}"
 
 
 
 date="$(python3 -c 'import datetime; print(datetime.datetime.now().strftime("%Y-%m-%d-%H"))')"
-logfile="logs/${RUN_NAME}-${date}.txt"
-cloud_log_file="${MODEL_DIR}/logs-${date}-${RUN_NAME}.txt"
+logfile="logs/${RUN_NAME}-${RUN_ID}-${date}.txt"
+cloud_log_file="${MODEL_DIR}/logs-${date}-${RUN_NAME}-${RUN_ID}.txt"
 cloud_description_file="${MODEL_DIR}/description.txt"
 mkdir -p logs
 
 export DATASET="--dataset ${DATASET}"
 #export RESTORE_DIR="--restore_dir ${RESTORE_DIR} --restore_trainable_variables true"
-export RESTORE_DIR=""
+export RESTORE_DIR="--restore_dir ${MODEL_DIR} --restore_trainable_variables true"
 export RUN_DESC="
 name: ${RUN_NAME}/${RUN_ID}
 date: ${date}
