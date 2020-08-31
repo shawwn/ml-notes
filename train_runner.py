@@ -260,7 +260,11 @@ class TrainRunner(object):
         outputs_from_all_shards=False,
     )
     initializer = tf.global_variables_initializer()
-    self.saver = tf.train.Saver(keep_checkpoint_every_n_hours=0.5)
+    if FLAGS.restore_trainable_variables:
+      self.var_list = tf.trainable_variables()
+    else:
+      self.var_list = tf.global_variables()
+    self.saver = tf.train.Saver(var_list=self.var_list, keep_checkpoint_every_n_hours=0.5)
     graph_io.write_graph(tf.Graph().as_graph_def(add_shapes=True),
                          FLAGS.model_dir, "graph.pbtxt")
 
@@ -272,11 +276,7 @@ class TrainRunner(object):
       ckpt = tf.train.latest_checkpoint(FLAGS.restore_dir)
       if ckpt is not None:
         step = tflex.checkpoint_step(ckpt) or 0
-        if FLAGS.restore_trainable_variables:
-          var_list = tf.trainable_variables()
-        else:
-          var_list = tf.global_variables()
-        saver = tf.train.Saver(var_list=var_list, restore_sequentially=True)
+        saver = tf.train.Saver(var_list=self.var_list, restore_sequentially=True)
         for x in var_list:
           tf.logging.info('\t%s', repr(x))
         tf.logging.info('Restoring %s step %d', ckpt, step)
