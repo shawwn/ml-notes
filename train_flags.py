@@ -50,6 +50,10 @@ flags.DEFINE_string(
     help=('The directory where the model should be restored from'))
 
 flags.DEFINE_bool(
+    'fresh', default=False,
+    help=('Whether to skip restoring from restore_dir'))
+
+flags.DEFINE_bool(
     'restore_trainable_variables', default=True,
     help=('Only restore trainable variables'))
 
