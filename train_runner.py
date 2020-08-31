@@ -279,7 +279,7 @@ class TrainRunner(object):
         tf.logging.info('Restoring %s step %d', ckpt, step)
         saver.restore(self.sess, ckpt)
         tf.logging.info('Setting step %d', step)
-        self.global_step.load(step)
+        self.global_step.load(step, self.sess)
         tf.logging.info('Restoring %s step %d (done)', ckpt, step)
     self.cur_step = tflex.run(self.sess, self.global_step)
 
