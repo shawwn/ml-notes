@@ -1,5 +1,5 @@
 {
-    "iterations": 50,
+    "iterations": 10,
     "batch_per_core": 8,
     "precision": "float32",
     "encoder_path": "encoder",
