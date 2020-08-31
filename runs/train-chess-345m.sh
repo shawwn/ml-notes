@@ -4,8 +4,8 @@ export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-/tfk/lib}"
 export TPU_HOST=${TPU_HOST:-10.254.128.2}
 export TPU_NAME="${TPU_NAME:-tpu-v2-512-usc1a-2}"
 
-export RUN_ID="${RUN_ID:-b}"
-export RUN_NAME="${RUN_NAME:-chessrun02}"
+export RUN_ID="${RUN_ID:-a}"
+export RUN_NAME="${RUN_NAME:-chessrun03}"
 export RUN_DESC="${RUN_DESC:-345M test run}"
 tmux-set-title "${RUN_NAME}/${RUN_ID} ${TPU_NAME}"
 export MODEL_DIR="${MODEL_DIR:-gs://tpu-usc1/runs/gpt-2/${RUN_NAME}/${RUN_ID}/}"
