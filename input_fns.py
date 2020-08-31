@@ -286,6 +286,22 @@ def gpt2_input(params):
       dset = dset.repeat().prefetch(iterations)
     else:
       dset = dset.map(_sample_text, num_parallel_calls=tf.data.experimental.AUTOTUNE).repeat()
+  elif FLAGS.dataset.endswith('.tok16') and FLAGS.dataset.startswith('gs://'):
+    import tputil
+    tokens_var = tputil.tf_shard_variable(FLAGS.dataset, tf.uint16, current_host, num_hosts, use_resource=False)
+    def sample_fn():
+      return sample_text(tokens_var, amount=params['n_ctx'], batch_size=batch_size)
+    def init_fn():
+      return tokens_var.initializer
+    def upload_fn(session=None):
+      if session is None:
+        session = tf.get_default_session()
+      #n = len(tokens)
+      n = tokens_var.shape[0].value
+      tf.logging.info('Loading %s tokens to TPU host %d...', tflex.num(n), current_host)
+      assert session is not None
+      pass
+    dset = tflex.make_dataset_function(sample_fn=sample_fn, init_fn=init_fn, upload_fn=upload_fn)
   else:
     #dset = make_source_tokens(current_host, num_hosts, n_vocab=params['n_vocab'])
     all_tokens = get_source_tokens()

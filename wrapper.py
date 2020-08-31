@@ -130,11 +130,37 @@ def interact():
     import code
     code.InteractiveConsole(locals=globals()).interact()
 
+
+def clone_session(session=None, graph=None, interactive=False, **kws):
+  if session is None:
+    session = tf.get_default_session()
+  if graph is None:
+    graph = session.graph
+  config = session._config # is there a better way to do this?
+  master = session.sess_str # is there a better way to do this?
+  Session = (tf.compat.v1.InteractiveSession if interactive else tf.Session)
+  return Session(master, graph=graph, config=config, **kws)
+
+
+def reset_session(session=None, graph=None, interactive=True, **kws):
+  if session is None:
+    session = tf.get_default_session()
+  if graph is None:
+    graph = tf.Graph()
+  graph.as_default().__enter__()
+  session2 = clone_session(session, graph=graph, interactive=interactive, **kws)
+  session2.as_default().__enter__()
+  if 'sess' in globals():
+    globals()['sess'] = session2
+  return session2
+
+
 if __name__ == '__main__':
   _tf_patch = patch_tensorflow_interactive()
   if len(sys.argv) <= 1:
     from tensorflow.core.protobuf import config_pb2
     import tensorflow as tf
+    tf.logging.set_verbosity('DEBUG')
     import numpy as np
     #session_config = config_pb2.ConfigProto(allow_soft_placement=True, isolate_session_state=True)
     session_config = config_pb2.ConfigProto(allow_soft_placement=True, isolate_session_state=False)
@@ -144,21 +170,25 @@ if __name__ == '__main__':
     cluster_def = None
     job_names = None
     master_job = 'worker'
-    if 'TPU_NAME' in os.environ:
-      res = TPUClusterResolver(os.environ['TPU_NAME'])
-      master = res.get_master()
-      cluster_spec = res.cluster_spec()
-      if cluster_spec:
-        cluster_def = cluster_spec.as_cluster_def()
-        session_config.cluster_def.CopyFrom(cluster_def)
-        job_names = set([job.name for job in cluster_def.job])
-        assert len(job_names) == 1
-        master_job = cluster_def.job[0].name
-    elif 'TPU_IP' in os.environ:
-      master = os.environ['TPU_IP'].replace('grpc://', '')
-      if ':' not in master:
-        master = master + ':8470'
-      master = 'grpc://' + master
+    try:
+      if 'TPU_NAME' in os.environ:
+        res = TPUClusterResolver(os.environ['TPU_NAME'])
+        master = res.get_master()
+        cluster_spec = res.cluster_spec()
+        if cluster_spec:
+          cluster_def = cluster_spec.as_cluster_def()
+          session_config.cluster_def.CopyFrom(cluster_def)
+          job_names = set([job.name for job in cluster_def.job])
+          assert len(job_names) == 1
+          master_job = cluster_def.job[0].name
+      elif 'TPU_IP' in os.environ:
+        master = os.environ['TPU_IP'].replace('grpc://', '')
+        if ':' not in master:
+          master = master + ':8470'
+        master = 'grpc://' + master
+    except:
+      import traceback
+      traceback.print_exc()
     graph = tf.Graph()
     sess = tf.compat.v1.InteractiveSession(master, graph=graph, config=session_config)
     devices = sess.list_devices()

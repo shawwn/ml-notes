@@ -14,7 +14,7 @@
     "opt_name": "adam",
     "train_batch_size": 1024,
     "attn_dropout": 0.0,
-    "train_steps": 507407,
+    "train_steps": -1,
     "eval_steps": 10,
     "max_steps": 500000,
     "data_path": "gs://gpt-2-poetry/data/kingbase2019/epd/tfrecords/",

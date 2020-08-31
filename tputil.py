@@ -42,10 +42,41 @@ def tf_file_data(filename, out_dtype=None):
     data.set_shape((size // out_dtype.size,));
   return data, size
 
+_VALID_SCOPE_NAME_REGEX = re.compile("^[A-Za-z0-9_.\\-/>]*$")
+_VALID_OP_NAME_REGEX = re.compile("^[A-Za-z0-9.][A-Za-z0-9_.\\-/>]*$")
 
-def tf_file_variable(filename, dtype=None, **kws):
+def tf_sanitize_op_name(name, invalid='_'):
+  return ''.join([x if _VALID_OP_NAME_REGEX.match(x) else invalid for x in name])
+
+def tf_file_shard(filename, out_dtype, current_host, num_hosts):
+  data, size = tf_file_data(filename, out_dtype=out_dtype)
+  n = data.shape[0].value
+  #assert n % num_hosts == 0
+  k = n // num_hosts
+  i = current_host * k
+  j = (current_host + 1) * k
+  return data[i:j]
+
+def tf_file_variable(filename, dtype, **kws):
   data, size = tf_file_data(filename, out_dtype=dtype)
-  v = tf.Variable(data, dtype=dtype, **kws)
+  collections = kws.pop('collections', ['local_variables'])
+  trainable = kws.pop('trainable', False)
+  if 'name' in kws:
+    name = kws.pop('name')
+  else:
+    name = tf_sanitize_op_name(filename)
+  v = tf.Variable(data, dtype=dtype, collections=collections, trainable=trainable, name=name, **kws)
+  return v
+
+def tf_shard_variable(filename, dtype, current_host, num_hosts, **kws):
+  data = tf_file_shard(filename, out_dtype=dtype, current_host=current_host, num_hosts=num_hosts)
+  collections = kws.pop('collections', ['local_variables'])
+  trainable = kws.pop('trainable', False)
+  if 'name' in kws:
+    name = kws.pop('name')
+  else:
+    name = tf_sanitize_op_name(filename + '_%05d_of_%05d' % (current_host, num_hosts))
+  v = tf.Variable(data, dtype=dtype, collections=collections, trainable=trainable, name=name, **kws)
   return v
 
 

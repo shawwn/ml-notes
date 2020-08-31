@@ -55,7 +55,7 @@ def wrap_computation_in_while_loop(op_fn, n, parallel_iterations=1):
       return i + 1
 
   return tf.while_loop(
-      lambda i: tf.less(i, n),
+      lambda i: tf.constant(True) if n is None else tf.less(i, n),
       computation, [tf.constant(0)],
       parallel_iterations=parallel_iterations)
 
@@ -77,7 +77,7 @@ def tpu_ordinal_fn(shard_index_in_host):
 class TrainRunner(object):
   """Remove init overheads in TPU Estimator via direct session.run calls."""
 
-  def __init__(self, iterations, train_steps):
+  def __init__(self, iterations, train_steps=-1):
     tf.logging.info("TrainRunner: constructor")
     self.feature_structure = {}
     self.loss = None
@@ -88,8 +88,11 @@ class TrainRunner(object):
     self.sess = None
     self.input_sess = None
     self.infeed_thread = None
-    if train_steps % iterations != 0:
-      train_steps = iterations * int(math.ceil(train_steps / iterations))
+    if train_steps < 0:
+      train_steps = None
+    if train_steps is not None:
+      if train_steps % iterations != 0:
+        train_steps = iterations * int(math.ceil(train_steps / iterations))
     self.train_steps = train_steps
     self.input_graph = tf.Graph()
     with tf.Graph().as_default() as self.init_graph:
@@ -305,7 +308,7 @@ class TrainRunner(object):
       path = FLAGS.model_dir + "/model.ckpt-%d" % step
       tf.logging.info('step %d: Saving checkpoint %s...', step, path)
       now = time.time()
-      saver.save(sess, path)
+      saver.save(sess, path, write_meta_graph=False, write_state=False)
       elapsed = time.time() - now
       tf.logging.info('step %d: Saved checkpoint %s in %.2fs', step, path, elapsed)
 
@@ -320,8 +323,8 @@ class TrainRunner(object):
     #tflex.run(sess, self.global_step.initializer, dict([(self.global_step.initializer.inputs[1], self.cur_step)]))
     for i in range(num_threads):
       checkpoint_threads.append(None)
-    end_step = self.cur_step + self.train_steps
-    while self.cur_step < end_step:
+    end_step = None if self.train_steps is None else (self.cur_step + self.train_steps)
+    while True if end_step is None else (self.cur_step < end_step):
       tflex.check_commands()
       if tflex.should_quit():
         tf.logging.info("TrainRunner: quitting")

@@ -46,13 +46,16 @@ printf "%s" "${RUN_DESC}"
 export TPU_SPLIT_COMPILE_AND_EXECUTE=1
 export TF_TPU_WATCHDOG_TIMEOUT=1800
 
-cores="$(echo $TPU_NAME | sed 's/^tpu-v[23][-]\([0-9]*\).*$/\1/g')"
-if [ -z "$cores" ]
+if [ -z "$TPU_CORES" ]
 then
-  1>&2 echo "Failed to parse TPU core count from $TPU_NAME"
-  exit 1
+  cores="$(echo $TPU_NAME | sed 's/^tpu-v[23][-]\([0-9]*\).*$/\1/g')"
+  if [ -z "$cores" ]
+  then
+    1>&2 echo "Failed to parse TPU core count from $TPU_NAME"
+    exit 1
+  fi
+  export TPU_CORES=$cores
 fi
-export TPU_CORES=$cores
 
 
 if [ ! -z "${DEV}" ]
