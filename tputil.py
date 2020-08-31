@@ -16,6 +16,9 @@ if 'state' not in globals():
   state.client = None
 
 
+import ring
+
+@ring.lru(expire=60)
 def gs_filesize(filename):
   """tf.string.length unfortunately fails for files larger than 2GB due to its result being a 32-bit integer. Punt by asking gsutil for the filesize."""
   import subprocess
