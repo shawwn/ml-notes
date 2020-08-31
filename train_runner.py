@@ -308,7 +308,7 @@ class TrainRunner(object):
       path = FLAGS.model_dir + "/model.ckpt-%d" % step
       tf.logging.info('step %d: Saving checkpoint %s...', step, path)
       now = time.time()
-      saver.save(sess, path, write_meta_graph=False)
+      saver.save(sess, path, write_meta_graph=False, global_step=step)
       elapsed = time.time() - now
       tf.logging.info('step %d: Saved checkpoint %s in %.2fs', step, path, elapsed)
 
