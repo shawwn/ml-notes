@@ -15,7 +15,7 @@
     "opt_name": "adafactor",
     "train_batch_size": 512,
     "attn_dropout": 0.0,
-    "train_steps": 1038814,
+    "train_steps": -1,
     "eval_steps": 10,
     "max_steps": 300000,
     "data_path": "gs://connors-datasets/openwebtext/",
