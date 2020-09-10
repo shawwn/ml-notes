@@ -14,7 +14,7 @@ export GIN_CONFIG="cfg/${RUN_NAME}.gin"
 
 
 export MODEL_NAME="${MODEL_NAME:-1558M}"
-export DATASET="${DATASET:-gs://dota-euw4a/datasets/uberset_v1/gpt2_uberset_v1_full.txt.00.tok16}"
+export DATASET="${DATASET:-gs://dota-euw4a/datasets/uberset_v1.tok16}"
 export RESTORE_DIR="${RESTORE_DIR:-gs://dota-euw4a/models/gpt-2/${MODEL_NAME}}"
 
 
