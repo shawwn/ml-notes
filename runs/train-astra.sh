@@ -2,7 +2,7 @@
 set -ex
 export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-/tfk/lib}"
 export TPU_HOST=${TPU_HOST:-10.255.128.3}
-export TPU_NAME="${TPU_NAME:-tpu-v3-32-euw4a-40}"
+export TPU_NAME="${TPU_NAME:-tpu-v3-8-euw4a-201}"
 
 export RUN_ID="${RUN_ID:-a}"
 export RUN_NAME="${RUN_NAME:-astra01}"
