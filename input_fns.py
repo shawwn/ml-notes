@@ -3,6 +3,7 @@ import tensorflow as tf
 import tflex
 import os
 import tqdm
+import tputil
 from pprint import pprint as pp
 
 from train_flags import FLAGS
@@ -287,10 +288,9 @@ def gpt2_input(params):
     else:
       dset = dset.map(_sample_text, num_parallel_calls=tf.data.experimental.AUTOTUNE).repeat()
   elif FLAGS.dataset.endswith('.tok16') and FLAGS.dataset.startswith('gs://'):
-    import tputil
     tokens_var = tputil.tf_shard_variable(FLAGS.dataset, tf.uint16, current_host, num_hosts, use_resource=False)
     def sample_fn():
-      return sample_text(tokens_var, amount=params['n_ctx'], batch_size=batch_size)
+      return tputil.sample_text(tokens_var, amount=params['n_ctx'], batch_size=batch_size)
     def init_fn():
       return tokens_var.initializer
     def upload_fn(session=None):
@@ -315,7 +315,7 @@ def gpt2_input(params):
     with tf.variable_scope('cpu%d' % current_host):
       tokens_var = tf.get_local_variable('input_tokens', dtype=tf.uint16, shape=[len(tokens)], use_resource=True)
     def sample_fn():
-      return sample_text(tokens_var, amount=params['n_ctx'], batch_size=batch_size)
+      return tputil.sample_text(tokens_var, amount=params['n_ctx'], batch_size=batch_size)
     def init_fn():
       return tokens_var.initializer
     def upload_fn(session=None):

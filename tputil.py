@@ -83,6 +83,40 @@ def tf_shard_variable(filename, dtype, current_host, num_hosts, **kws):
   return v
 
 
+# given a bin that holds `total` elements, return a random
+# position such that you can take the next `subset` elements
+# without going out of bounds. E.g. randpos(1,10) will return
+# [0..9], randpos(2,10) will return [0..8], etc.
+def randpos(subset, total, dtype=tf.int64, batch_size=1):
+  assert subset <= total
+  return tf.random.uniform([batch_size], maxval=(total - subset) + 1, dtype=dtype)
+
+
+def sample(chunk, chunk_size, tokens_per_example, batch_size=1):
+  pos = randpos(tokens_per_example, chunk_size, batch_size=batch_size)
+  part = tf.tile(tf.expand_dims(tf.range(tokens_per_example, dtype=tf.int64), axis=0), [batch_size, 1])
+  indices = part + tf.expand_dims(pos, axis=1)
+  tokens = tf.gather(chunk, indices)
+  return tokens
+
+
+def sample_tokens(chunk, chunk_size, tokens_per_example, batch_size=1):
+  pos = randpos(tokens_per_example + 1, chunk_size, batch_size=batch_size)
+  part = tf.tile(tf.expand_dims(tf.range(tokens_per_example, dtype=tf.int64), axis=0), [batch_size, 1])
+  indices = part + tf.expand_dims(pos, axis=1)
+  feature = tf.gather(chunk, indices)
+  label = tf.gather(chunk, indices + 1)
+  feature = tf.cast(feature, dtype=tf.int32)
+  label = tf.cast(label, dtype=tf.int32)
+  return feature, label
+
+
+def sample_text(chunk, amount, batch_size=1):
+  #chunk_size = tf.size(chunk, out_type=tf.dtypes.int64)
+  chunk_size = chunk.shape[0].value
+  return sample_tokens(chunk=chunk, chunk_size=chunk_size, tokens_per_example=amount, batch_size=batch_size)
+
+
 from tensorflow.core.protobuf import config_pb2
 from functools import partial
 
