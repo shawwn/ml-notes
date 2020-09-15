@@ -24,6 +24,6 @@
     "n_ctx": 1024,
     "n_layer": 48,
     "precision": "bfloat16",
-    "scale_by_depth": true,
-    "scale_by_in": true
+    "scale_by_depth": false,
+    "scale_by_in": false
 }
