@@ -352,7 +352,7 @@ def model_grad(X, params, labels=None, past=None, scope='model', reuse=tf.AUTO_R
         wte = tf.get_variable('wte')
         gamma_final = tf.get_variable('ln_f/g')
         beta_final = tf.get_variable('ln_f/b')
-        var_final = [gamma_final, beta_final]
+        var_final = [wte, gamma_final, beta_final]
         batch, sequence = shape_list(X)
         past_length = 0 if past is None else tf.shape(past)[-2]
 
