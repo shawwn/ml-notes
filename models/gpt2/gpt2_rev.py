@@ -284,7 +284,7 @@ def _assert_float_dtype(dtype):
     return dtype
 
 
-def model(X, params, labels=None, past=None, scope='model', reuse=False, train=False):
+def model(X, params, labels=None, past=None, scope='model', reuse=False, train=False, return_logits=True):
     with tf.variable_scope(scope, reuse=reuse):
         results = {}
         batch, sequence = shape_list(X)
@@ -317,6 +317,11 @@ def model(X, params, labels=None, past=None, scope='model', reuse=False, train=F
         # Transformer
         presents = []
         activations = []
+
+        h1, h2 = split(True, h)
+        h = (h1, h2)
+        activations.append((h1, h2))
+
         pasts = tf.unstack(past, axis=1) if past is not None else [None] * params["n_layer"]
         assert len(pasts) == params["n_layer"]
         checkpoint=False if 'memory_saving_gradients' not in params else params['memory_saving_gradients']
@@ -332,28 +337,24 @@ def model(X, params, labels=None, past=None, scope='model', reuse=False, train=F
             activations.append(h)
         results['present'] = tf.stack(presents, axis=1) if len(presents) > 0 else None
         results['activations'] = activations
-        h = combine(True, *h)
-        h = norm(h, 'ln_f', params=params)
+        if return_logits:
+            h = combine(True, *h)
+            h = norm(h, 'ln_f', params=params)
 
-        h_flat = tf.reshape(h, [batch*sequence, params["n_embd"]])
-        logits = tf.matmul(h_flat, wte, transpose_b=True)
-        logits = tf.reshape(logits, [batch, sequence, params["n_vocab"]])
-        results['logits'] = logits
-        #results['loss'] = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=X[:, 1:], logits=logits[:, :-1]))
+            h_flat = tf.reshape(h, [batch*sequence, params["n_embd"]])
+            logits = tf.matmul(h_flat, wte, transpose_b=True)
+            logits = tf.reshape(logits, [batch, sequence, params["n_vocab"]])
+            results['logits'] = logits
+            #results['loss'] = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=X[:, 1:], logits=logits[:, :-1]))
         return results
 
 
 def model_grad(X, params, labels=None, past=None, scope='model', reuse=tf.AUTO_REUSE, train=False, recompute=True):
-    results = model(X=X, params=params, reuse=reuse, train=train)
+    results = model(X=X, params=params, reuse=reuse, train=train, return_logits=False)
     with tf.variable_scope(scope, reuse=reuse):
         grads_list = []
         vars_list = []
 
-        wpe = tf.get_variable('wpe')
-        wte = tf.get_variable('wte')
-        gamma_final = tf.get_variable('ln_f/g')
-        beta_final = tf.get_variable('ln_f/b')
-        var_final = [wte, gamma_final, beta_final]
         batch, sequence = shape_list(X)
         past_length = 0 if past is None else tf.shape(past)[-2]
 
@@ -362,10 +363,17 @@ def model_grad(X, params, labels=None, past=None, scope='model', reuse=tf.AUTO_R
         h = combine(True, h1, h2)
         h = norm(h, 'ln_f', params=params)
         h_flat = tf.reshape(h, [batch*sequence, params["n_embd"]])
+
+        wte = tf.get_variable('wte')
         logits = tf.matmul(h_flat, wte, transpose_b=True)
         logits = tf.reshape(logits, [batch, sequence, params["n_vocab"]])
+
         #results['loss'] = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=X[:, 1:], logits=logits[:, :-1]))
         results['loss'] = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=labels, logits=logits))
+
+        gamma_final = tf.get_variable('ln_f/g')
+        beta_final = tf.get_variable('ln_f/b')
+        var_final = [wte, gamma_final, beta_final]
 
         _grads = tf.gradients(results['loss'], [h1, h2] + var_final, gate_gradients=True)
         dh1, dh2 = _grads[0], _grads[1]
