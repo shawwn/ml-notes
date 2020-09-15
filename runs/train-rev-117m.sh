@@ -18,6 +18,8 @@ export MODEL_NAME="${MODEL_NAME:-117M}"
 export DATASET="${DATASET:-gs://tpu-usc1/datasets/novels.tok16}"
 export RESTORE_DIR="${RESTORE_DIR:-gs://tpu-usc1/models/gpt-2/${MODEL_NAME}}"
 
+export WRAPPER="${WRAPPER:-wrapper.py}"
+
 
 
 date="$(python3 -c 'import datetime; print(datetime.datetime.now().strftime("%Y-%m-%d-%H"))')"
@@ -61,7 +63,7 @@ fi
 
 if [ ! -z "${DEV}" ]
 then
-  exec python3 -m pdb -c continue wrapper.py main_gpt2.py --tpu "${TPU_NAME}" --model_dir "${MODEL_DIR}" ${RESTORE_DIR} --params "${MODEL_NAME}.json" --num_cores "${TPU_CORES}" ${DATASET} "$@"
+  exec python3 -m pdb -c continue $WRAPPER main_gpt2.py --tpu "${TPU_NAME}" --model_dir "${MODEL_DIR}" ${RESTORE_DIR} --params "${MODEL_NAME}.json" --num_cores "${TPU_CORES}" ${DATASET} "$@"
   exit -1
 fi
 
@@ -73,7 +75,7 @@ while true; do
   echo "Starting production training run in 10s ..."
   sleep 10
 
-  timeout --signal=SIGKILL 4h python3 wrapper.py main_gpt2.py --tpu "${TPU_NAME}" --model_dir "${MODEL_DIR}" ${RESTORE_DIR} --params "${MODEL_NAME}.json" --num_cores "${TPU_CORES}" ${DATASET} "$@" 2>&1 | tee -a "${logfile}" | tee /dev/fd/2 | gsutil cp - "${cloud_log_file}"
+  timeout --signal=SIGKILL 4h python3 $WRAPPER main_gpt2.py --tpu "${TPU_NAME}" --model_dir "${MODEL_DIR}" ${RESTORE_DIR} --params "${MODEL_NAME}.json" --num_cores "${TPU_CORES}" ${DATASET} "$@" 2>&1 | tee -a "${logfile}" | tee /dev/fd/2 | gsutil cp - "${cloud_log_file}"
   if [ ! -z "$TPU_NO_RECREATE" ]
   then
     echo "Not recreating TPU. Waiting 30s."
