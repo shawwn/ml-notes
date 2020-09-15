@@ -78,6 +78,7 @@ def main(unused_argv):
   params['n_embd'] = getval('n_embd', 768)
   params['n_head'] = getval('n_head', 12)
   params['n_layer'] = getval('n_layer', 12)
+  params['n_vocab'] = getval('n_vocab', 50257)
   params['opt_name'] = getval('opt_name', 'adam')
   params['beta1'] = getval('beta1', 0.9)
   params['beta2'] = getval('beta2', 0.999)
