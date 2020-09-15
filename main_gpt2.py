@@ -35,7 +35,7 @@ from input_fns import gpt2_input
 import json
 
 def parseval(value, dtype, default=None):
-  if dtype == 'str':
+  if dtype == 'str' or isinstance(default, str):
     pass
   elif dtype == 'int' or isinstance(default, int):
     value = int(value)
@@ -71,13 +71,23 @@ def main(unused_argv):
   with open(FLAGS.params) as f:
     params = json.load(f)
   params['use_tpu'] = getval('use_tpu', True)
-  batch_per_core = getval('batch_per_core', 1)
-  FLAGS.train_batch_size = FLAGS.num_cores * getval('batch_per_core', 1)
-  FLAGS.iterations_per_loop = getval('iterations', 20)
+  params['batch_per_core'] = getval('batch_per_core', 1)
+  params['iterations'] = getval('iterations', 20)
+  params['batch_size'] = FLAGS.num_cores * params['batch_per_core']
+  params['n_ctx'] = getval('n_ctx', 1024)
+  params['n_embd'] = getval('n_embd', 768)
+  params['n_head'] = getval('n_head', 12)
+  params['n_layer'] = getval('n_layer', 12)
+  params['opt_name'] = getval('opt_name', 'adam')
+  params['beta1'] = getval('beta1', 0.9)
+  params['beta2'] = getval('beta2', 0.999)
+  params['epsilon'] = getval('epsilon', 1e-9)
+  params['lr'] = getval('lr', 0.00025)
+  FLAGS.train_batch_size = params['batch_size']
+  FLAGS.iterations_per_loop = params['iterations']
   FLAGS.train_steps = getval('train_steps', int(2e6))
-  params['batch_size'] = FLAGS.train_batch_size
   params['precision'] = getval('precision', 'float32')
-  params['model'] = getval('model', 'GPT2', dtype=str)
+  params['model'] = getval('model', 'GPT2')
   assert params['model'] in ['GPT2', 'GPT2Rev']
   model = gpt2_rev_model if params['model'] == 'GPT2Rev' else gpt2_model
   pp(params)
