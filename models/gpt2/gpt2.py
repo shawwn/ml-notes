@@ -3,6 +3,25 @@ import math
 import numpy as np
 import tensorflow as tf
 
+from tensorflow.contrib.training import HParams
+
+def default_hparams(trainable=True, dtype=tf.float32, scope='model'):
+    return {
+        'n_vocab': 50257,
+        'n_ctx': 1024,
+        'n_embd': 768,
+        'n_head': 12,
+        'n_layer': 12,
+        'res_dropout': 0.0,
+        'attn_dropout': 0.0,
+        'embed_dropout': 0.0,
+        'dtype': dtype,
+        'trainable': trainable,
+        'scope': scope,
+        'precision': 'bfloat16' if dtype == tf.bfloat16 else 'float32',
+        'scale_by_depth': False,
+        'scale_by_in': False,
+    }
 
 def shape_list(x):
     """Deal with dynamic shape in tensorflow cleanly."""
@@ -210,6 +229,7 @@ def model(X, params, labels=None, past=None, scope='model', reuse=False, train=F
 
         # Transformer
         presents = []
+        activations = []
         pasts = tf.unstack(past, axis=1) if past is not None else [None] * params["n_layer"]
         assert len(pasts) == params["n_layer"]
         checkpoint=False if 'memory_saving_gradients' not in params else params['memory_saving_gradients']
@@ -220,7 +240,9 @@ def model(X, params, labels=None, past=None, scope='model', reuse=False, train=F
                 tf.logging.info('checkpointing layer %d', layer)
                 tf.add_to_collection('checkpoints', h)
             presents.append(present)
+            activations.append(h)
         results['present'] = tf.stack(presents, axis=1)
+        results['activations'] = activations
         h = norm(h, 'ln_f', params=params)
 
         h_flat = tf.reshape(h, [batch*sequence, params["n_embd"]])
