@@ -6,6 +6,18 @@ import tensorflow as tf
 from tensorflow.contrib.training import HParams
 
 def default_hparams(trainable=True, dtype=tf.float32, scope='model'):
+    # return HParams(
+    #     n_vocab=50257,
+    #     n_ctx=1024,
+    #     n_embd=768,
+    #     n_head=12,
+    #     n_layer=12,
+    #     res_dropout=0.0,
+    #     attn_dropout=0.0,
+    #     dtype=dtype,
+    #     trainable=trainable,
+    #     scope=scope,
+    # )
     return {
         'n_vocab': 50257,
         'n_ctx': 1024,
@@ -161,6 +173,24 @@ def mlp(x, scope, n_state, *, params, train=False):
         return h2
 
 
+def combine(concat, *argv):
+  if concat:
+    y = tf.concat(list(argv), axis=-1)
+  else:
+    y = tuple(argv)
+  return y
+
+
+def split(concat, x):
+  if concat or type(x) != tuple:
+    n = x.shape[-1].value
+    x1 = x[..., :n // 2]
+    x2 = x[..., n // 2:]
+  else:
+    x1, x2 = x
+  return x1, x2
+
+
 def block(x, scope, *, past, params, attn, train=False, **attn_kws):
     with tf.variable_scope(scope):
         nx = x.shape[-1].value
@@ -171,6 +201,63 @@ def block(x, scope, *, past, params, attn, train=False, **attn_kws):
         m = mlp(ln_2, 'mlp', nx*4, params=params, train=train)
         x = x + m
         return x, present
+
+
+def residual(x, scope, *, past, params, attn, train=False, concat=False, **attn_kws):
+    x1, x2 = split(concat, x)
+    with tf.variable_scope("f"):
+      f_x2, f_x2_present = block(x2, scope, past=past, params=params, attn=attn, train=train, **attn_kws)
+    y1 = f_x2 + x1
+    with tf.variable_scope("g"):
+      f_y1, f_y1_present = block(y1, scope, past=past, params=params, attn=attn, train=train, **attn_kws)
+    y2 = f_y1 + x2
+    # TODO: How to deal with presents?
+    return combine(concat, y1, y2), None
+
+
+def residual_backward(y, scope, *, past, params, attn, train=False, concat=False, **attn_kws):
+    y1, y2 = split(concat, y)
+    with tf.variable_scope("g"):
+      f_y1, f_y1_present = block(y1, scope, past=past, params=params, attn=attn, train=train, **attn_kws)
+    x2 = y2 - f_y1
+    with tf.variable_scope("f"):
+      f_x2, f_x2_present = block(x2, scope, past=past, params=params, attn=attn, train=train, **attn_kws)
+    x1 = y1 - f_x2
+    # TODO: How to deal with presents?
+    return combine(concat, x1, x2), None
+
+
+def residual_grad(x, dy, scope, *, past, params, attn, train=False, concat=False, **attn_kws):
+    x1, x2 = split(concat, x)
+    x1, x2 = tf.stop_gradient(x1), tf.stop_gradient(x2)
+    dy1, dy2 = split(concat, dy)
+    y, present = residual((x1, x2), scope=scope, past=past, params=params, attn=attn, train=train, concat=False, **attn_kws)
+    y1, y2 = y
+
+    # F function weights.
+    fw_list = tf.trainable_variables(tf.get_variable_scope().name + '/f/' + scope + '/')
+    # G function weights.
+    gw_list = tf.trainable_variables(tf.get_variable_scope().name + '/g/' + scope + '/')
+
+    dd1 = tf.gradients(y2, [y1] + gw_list, dy2, gate_gradients=True)
+    dy2_y1 = dd1[0]
+    dy1_plus = dy2_y1 + dy1
+    dgw = dd1[1:]
+    dd2 = tf.gradients(y1, [x1, x2] + fw_list, dy1_plus, gate_gradients=True)
+    dx1 = dd2[0]
+    dx2 = dd2[1]
+    dfw = dd2[2:]
+    dx2 += tf.gradients(x2, x2, dy2, gate_gradients=True)[0]
+
+    dw_list = list(dfw) + list(dgw)
+    w_list = list(fw_list) + list(gw_list)
+
+    # Inject dw dependency.
+    with tf.control_dependencies(dw_list):
+      dx = combine(concat, tf.identity(dx1), tf.identity(dx2))
+
+    return dx, w_list, dw_list
+
 
 def past_shape(*, params, batch_size=None, sequence=None):
     return [batch_size, params["n_layer"], 2, params["n_head"], sequence, params["n_embd"] // params["n_head"]]
@@ -235,19 +322,97 @@ def model(X, params, labels=None, past=None, scope='model', reuse=False, train=F
         checkpoint=False if 'memory_saving_gradients' not in params else params['memory_saving_gradients']
         every = 1 if 'memory_saving_checkpoints' not in params else params['memory_saving_checkpoints']
         for layer, past in enumerate(pasts):
-            h, present = block(h, 'h%d' % layer, past=past, params=params, attn=attn, train=train, batch_size=batch, seq_length=sequence)
+            h, present = residual(h, 'h%d' % layer, past=past, params=params, attn=attn, train=train, batch_size=batch, seq_length=sequence)
             if checkpoint and (isinstance(every, int) and layer % every == 0 or layer in every):
                 tf.logging.info('checkpointing layer %d', layer)
                 tf.add_to_collection('checkpoints', h)
-            presents.append(present)
+            if present is not None:
+              presents.append(present)
             activations.append(h)
-        results['present'] = tf.stack(presents, axis=1)
+        results['present'] = tf.stack(presents, axis=1) if len(presents) > 0 else None
         results['activations'] = activations
+        h = combine(True, *h)
         h = norm(h, 'ln_f', params=params)
 
         h_flat = tf.reshape(h, [batch*sequence, params["n_embd"]])
         logits = tf.matmul(h_flat, wte, transpose_b=True)
         logits = tf.reshape(logits, [batch, sequence, params["n_vocab"]])
         results['logits'] = logits
+        #results['loss'] = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=X[:, 1:], logits=logits[:, :-1]))
+        return results
+
+
+def model_grad(X, params, labels=None, past=None, scope='model', reuse=tf.AUTO_REUSE, train=False, recompute=False):
+    results = model(X=X, params=params, reuse=reuse, train=train)
+    with tf.variable_scope(scope, reuse=reuse):
+        grads_list = []
+        vars_list = []
+
+        wpe = tf.get_variable('wpe')
+        wte = tf.get_variable('wte')
+        gamma_final = tf.get_variable('ln_f/g')
+        beta_final = tf.get_variable('ln_f/b')
+        var_final = [wte, gamma_final, beta_final]
+        batch, sequence = shape_list(X)
+        past_length = 0 if past is None else tf.shape(past)[-2]
+
+        h1, h2 = results['activations'][-1]
+        h1, h2 = tf.stop_gradient(h1), tf.stop_gradient(h2)
+        h = combine(True, h1, h2)
+        h = norm(h, 'ln_f', params=params)
+        h_flat = tf.reshape(h, [batch*sequence, params["n_embd"]])
+        logits = tf.matmul(h_flat, wte, transpose_b=True)
+        logits = tf.reshape(logits, [batch, sequence, params["n_vocab"]])
+        results['loss'] = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=X[:, 1:], logits=logits[:, :-1]))
+
+        _grads = tf.gradients(results['loss'], [h1, h2] + var_final, gate_gradients=True)
+        dh1, dh2 = _grads[0], _grads[1]
+        _grads = _grads[2:]
+
+        # Injected dependency.
+        with tf.control_dependencies(_grads):
+          h_grad = (tf.identity(dh1), tf.identity(dh2))
+        grads_list.extend(_grads)
+        # grads_list.extend(_grads[2:])
+        vars_list.extend(var_final)
+
+
+        h1, h2 = results['activations'][-1]
+        h1, h2 = tf.stop_gradient(h1), tf.stop_gradient(h2)
+        h = (h1, h2)
+
+        #pasts = tf.unstack(past, axis=1) if past is not None else [None] * params["n_layer"]
+        nlayers = params["n_layer"]
+        for layer in range(nlayers - 1, -1, -1):
+          # reconstruct input.
+          if layer > 0 and recompute:
+            h, present = residual_backward(h, 'h%d' % layer, past=past, params=params, attn=attn, train=train, batch_size=batch, seq_length=sequence)
+          else:
+            h = results['activations'][layer]
+
+          # rerun the layer, and get gradients.
+          h_grad, w_list, w_grad = residual_grad(h, h_grad, 'h%d' % layer, past=past, params=params, attn=attn, train=train, batch_size=batch, seq_length=sequence)
+
+          grads_list.extend(w_grad)
+          vars_list.extend(w_list)
+
+        def init_conv_grad(y, dy):
+          wpe = tf.get_variable("wpe")
+          wte = tf.get_variable("wte")
+          w_list = [wpe, wte]
+          dw_list = tf.gradients(y, w_list, dy)
+          return w_list, dw_list
+
+        # h1, h2 = results['activations'][0]
+        # # h1, h2 = tf.stop_gradient(h1), tf.stop_gradient(h2)
+        # h = (h1, h2)
+        h = combine(True, h)
+        h_grad = combine(True, h_grad)
+        var_init, _grads = init_conv_grad(h, h_grad)
+        grads_list.extend(_grads)
+        vars_list.extend(var_init)
+
+        results['grads_and_vars'] = list(zip(grads_list, vars_list))
+
         return results
 
