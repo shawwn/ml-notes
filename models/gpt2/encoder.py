@@ -205,7 +205,10 @@ def bucket_path(path, *parts):
 def get_encoder(model_path=None):
   if model_path is None:
     #model_path = 'gs://gpt-2/models/117M/'
-    model_path = os.path.dirname(__file__)
+    #model_path = os.path.dirname(__file__)
+    from transformers import GPT2TokenizerFast
+    tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
+    return tokenizer
   with bucket_file(bucket_path(model_path, 'encoder.json')) as (vocab_path, vocab_data):
     with bucket_file(bucket_path(model_path, 'vocab.bpe')) as (bpe_merges_path, bpe_data):
       encoder = json.loads(vocab_data.decode('utf8'))
