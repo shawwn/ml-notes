@@ -364,7 +364,8 @@ def model_grad(X, params, labels=None, past=None, scope='model', reuse=tf.AUTO_R
         h_flat = tf.reshape(h, [batch*sequence, params["n_embd"]])
         logits = tf.matmul(h_flat, wte, transpose_b=True)
         logits = tf.reshape(logits, [batch, sequence, params["n_vocab"]])
-        results['loss'] = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=X[:, 1:], logits=logits[:, :-1]))
+        #results['loss'] = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=X[:, 1:], logits=logits[:, :-1]))
+        results['loss'] = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=labels, logits=logits))
 
         _grads = tf.gradients(results['loss'], [h1, h2] + var_final, gate_gradients=True)
         dh1, dh2 = _grads[0], _grads[1]
