@@ -5,8 +5,9 @@ from tensorflow.python.ops import gradients
 from pprint import pformat as pps
 
 
-def create_train_op(loss, params):
-    tf.logging.info("create_train_op(loss=%s, params=%s)", loss, pps(params))
+def create_train_op(params, loss=None, grads=None):
+    assert loss is None or grads is None
+    tf.logging.info("create_train_op(loss=%s, params=%s, grads=%s)", loss, pps(params), pps(grads))
     lr = params["lr"]
     global_step = tf.train.get_global_step()
     assert global_step is not None
@@ -114,25 +115,26 @@ def create_train_op(loss, params):
     logvars(other_vars, "other global variables")
     logvars(local_vars, "other local variables")
 
-    tf.logging.info("---------")
-    tf.logging.info("Gradient options:")
-    #use_memory_saving_gradients=True
-    use_memory_saving_gradients=False if 'memory_saving_gradients' not in params else params['memory_saving_gradients']
-    colocate_gradients_with_ops=True if 'colocate_gradients' not in params else params['colocate_gradients']
-    gate_gradients=None
-    tf.logging.info("use_memory_saving_gradients=%s", use_memory_saving_gradients)
-    tf.logging.info("colocate_gradients_with_ops=%s", colocate_gradients_with_ops)
-    tf.logging.info("gate_gradients=%s", gate_gradients)
-    if use_memory_saving_gradients:
-      #grads = memory_saving_gradients.gradients(loss, train_vars, colocate_gradients_with_ops=colocate_gradients_with_ops, checkpoints='memory')
-      #grads = memory_saving_gradients.gradients_memory if i == 0 else memory_saving_gradients.gradients_speed
-      #grads = memory_saving_gradients.gradients_speed if i == 0 else memory_saving_gradients.gradients_speed
-      grads = memory_saving_gradients.gradients
-      grads = grads(loss, train_vars, colocate_grients_with_ops=colocate_gradients_with_ops, gate_gradients=gate_gradients)
-    else:
-      grads = gradients.gradients(loss, train_vars, colocate_gradients_with_ops=colocate_gradients_with_ops, gate_gradients=gate_gradients)
+    if grads is None:
+      tf.logging.info("---------")
+      tf.logging.info("Gradient options:")
+      #use_memory_saving_gradients=True
+      use_memory_saving_gradients=False if 'memory_saving_gradients' not in params else params['memory_saving_gradients']
+      colocate_gradients_with_ops=True if 'colocate_gradients' not in params else params['colocate_gradients']
+      gate_gradients=None
+      tf.logging.info("use_memory_saving_gradients=%s", use_memory_saving_gradients)
+      tf.logging.info("colocate_gradients_with_ops=%s", colocate_gradients_with_ops)
+      tf.logging.info("gate_gradients=%s", gate_gradients)
+      if use_memory_saving_gradients:
+        #grads = memory_saving_gradients.gradients(loss, train_vars, colocate_gradients_with_ops=colocate_gradients_with_ops, checkpoints='memory')
+        #grads = memory_saving_gradients.gradients_memory if i == 0 else memory_saving_gradients.gradients_speed
+        #grads = memory_saving_gradients.gradients_speed if i == 0 else memory_saving_gradients.gradients_speed
+        grads = memory_saving_gradients.gradients
+        grads = grads(loss, train_vars, colocate_grients_with_ops=colocate_gradients_with_ops, gate_gradients=gate_gradients)
+      else:
+        grads = gradients.gradients(loss, train_vars, colocate_gradients_with_ops=colocate_gradients_with_ops, gate_gradients=gate_gradients)
+      grads = list(zip(grads, train_vars))
 
-    grads = list(zip(grads, train_vars))
     disconnected_grads = [v for g, v in grads if g is None]
     grads = [(g, v) if g is not None else (tf.zeros_like(v), v) for g, v in grads]  # replace disconnected gradients with zeros
 

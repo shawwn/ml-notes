@@ -322,6 +322,7 @@ def model(X, params, labels=None, past=None, scope='model', reuse=False, train=F
         checkpoint=False if 'memory_saving_gradients' not in params else params['memory_saving_gradients']
         every = 1 if 'memory_saving_checkpoints' not in params else params['memory_saving_checkpoints']
         for layer, past in enumerate(pasts):
+            tf.logging.info('gpt2_rev.model layer %d', layer)
             h, present = residual(h, 'h%d' % layer, past=past, params=params, attn=attn, train=train, batch_size=batch, seq_length=sequence)
             if checkpoint and (isinstance(every, int) and layer % every == 0 or layer in every):
                 tf.logging.info('checkpointing layer %d', layer)
@@ -342,7 +343,7 @@ def model(X, params, labels=None, past=None, scope='model', reuse=False, train=F
         return results
 
 
-def model_grad(X, params, labels=None, past=None, scope='model', reuse=tf.AUTO_REUSE, train=False, recompute=False):
+def model_grad(X, params, labels=None, past=None, scope='model', reuse=tf.AUTO_REUSE, train=False, recompute=True):
     results = model(X=X, params=params, reuse=reuse, train=train)
     with tf.variable_scope(scope, reuse=reuse):
         grads_list = []
@@ -384,6 +385,7 @@ def model_grad(X, params, labels=None, past=None, scope='model', reuse=tf.AUTO_R
         #pasts = tf.unstack(past, axis=1) if past is not None else [None] * params["n_layer"]
         nlayers = params["n_layer"]
         for layer in range(nlayers - 1, -1, -1):
+          tf.logging.info('gpt2_rev.model_grad layer %d', layer)
           # reconstruct input.
           if layer > 0 and recompute:
             h, present = residual_backward(h, 'h%d' % layer, past=past, params=params, attn=attn, train=train, batch_size=batch, seq_length=sequence)

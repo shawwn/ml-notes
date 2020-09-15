@@ -29,7 +29,7 @@ from train_flags import FLAGS
 
 from pprint import pprint as pp
 
-from model_fns import gpt2_model
+from model_fns import gpt2_model, gpt2_rev_model
 from input_fns import gpt2_input
 
 import json
@@ -77,6 +77,9 @@ def main(unused_argv):
   FLAGS.train_steps = getval('train_steps', int(2e6))
   params['batch_size'] = FLAGS.train_batch_size
   params['precision'] = getval('precision', 'float32')
+  params['model'] = getval('model', 'GPT2', dtype=str)
+  assert params['model'] in ['GPT2', 'GPT2Rev']
+  model = gpt2_rev_model if params['model'] == 'GPT2Rev' else gpt2_model
   pp(params)
   trunner = train_runner.TrainRunner(
       iterations=FLAGS.iterations_per_loop, train_steps=FLAGS.train_steps)
@@ -106,7 +109,7 @@ def main(unused_argv):
         return tf.contrib.tpu.TPUEstimatorSpec(mode, loss=loss, train_op=train_op)
       else:
         return tf.estimator.EstimatorSpec(mode, loss=loss, train_op=train_op)
-  trunner.initialize(gpt2_input, gpt2_model, params)
+  trunner.initialize(gpt2_input, model, params)
   tf.logging.info('trunner.initialize(): Done. Training...')
   trunner.train()
   tf.logging.info('trunner.train(): Done. Shutting down...')
