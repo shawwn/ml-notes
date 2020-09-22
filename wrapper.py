@@ -17,13 +17,26 @@ from six.moves.urllib.error import URLError
 from tensorflow.python import framework
 from tensorflow.python.client import session
 from tensorflow.python.distribute.cluster_resolver import tpu_cluster_resolver as resolver
-from tensorflow.contrib.cluster_resolver import TPUClusterResolver as BaseTPUClusterResolver
+from tensorflow.compat.v1.distribute.cluster_resolver import TPUClusterResolver as BaseTPUClusterResolver
 from tensorflow.python.eager.context import LogicalDevice
 from tensorflow.python.framework import errors
 from tensorflow.python.framework import test_util
 from tensorflow.python.platform import test
 from tensorflow.python.training import server_lib
 from tensorflow.python.util import compat
+
+
+try:
+  from cloud_tpu_client import client  # pylint: disable=g-import-not-at-top
+except ImportError:
+  try:
+    logging.debug(
+        'Falling back to TensorFlow client; we recommended you install the Cloud '
+        'TPU client directly with pip install cloud-tpu-client.')
+    from tensorflow.python.tpu.client import client  # pylint: disable=g-import-not-at-top
+  except ImportError:
+    client = None
+
 
 mock = test.mock
 
@@ -80,6 +93,26 @@ class TPUClusterResolver(BaseTPUClusterResolver):
     return spec2
 
 
+from six.moves.urllib import request
+
+def _as_text(s):
+  if isinstance(s, bytes):
+    return s.decode('utf-8')
+  return s
+
+def _request_compute_metadata(path):
+  _GCE_METADATA_ENDPOINT = 'http://35.225.160.61'
+  req = request.Request(
+      '%s/computeMetadata/v1/%s' % (_GCE_METADATA_ENDPOINT, path),
+      headers={'Metadata-Flavor': 'Google'})
+  resp = request.urlopen(req)
+  return _as_text(resp.read())
+
+# cli = client.Client(tpu=os.environ['TPU_NAME'])
+# service = cli._tpu_service()
+# info = service.projects().locations().nodes().get(name=cli._full_name().replace(os.environ['TPU_NAME'], 'tpu-v2-8-usc1f-0')).execute()
+# {'name': 'projects/gpt-2-15b-poetry/locations/us-central1-f/nodes/tpu-v2-8-usc1f-0', 'acceleratorType': 'v2-8', 'ipAddress': '10.48.0.2', 'state': 'READY', 'tensorflowVersion': '2.3', 'network': 'global/networks/tpu-usc1f', 'cidrBlock': '10.48.0.0/29', 'port': '8470', 'serviceAccount': 'service-41076153887@cloud-tpu.iam.gserviceaccount.com', 'createTime': '2020-09-18T07:21:45.237850246Z', 'schedulingConfig': {'preemptible': True}, 'networkEndpoints': [{'ipAddress': '10.48.0.2', 'port': 8470}], 'health': 'HEALTHY'}
+
 
 _master = resolver.TPUClusterResolver.master
 
@@ -99,7 +132,8 @@ def cluster_spec(cls, *args, **kws):
     r[k] = [reroute(ip, host=os.environ['TPU_HOST']) for ip in v]
   return server_lib.ClusterSpec(r)
 
-__fetch_cloud_tpu_metadata = resolver.TPUClusterResolver._fetch_cloud_tpu_metadata
+
+__fetch_cloud_tpu_metadata = (client.Client if client is not None else resolver.TPUClusterResolver)._fetch_cloud_tpu_metadata
 
 def _fetch_cloud_tpu_metadata(cls, *args, **kws):
   while True:
@@ -117,7 +151,7 @@ def _fetch_cloud_tpu_metadata(cls, *args, **kws):
 def patch_tensorflow():
   with mock.patch.object(resolver.TPUClusterResolver, 'master', mock_master):
     with mock.patch.object(resolver.TPUClusterResolver, 'cluster_spec', cluster_spec):
-      with mock.patch.object(resolver.TPUClusterResolver, '_fetch_cloud_tpu_metadata', _fetch_cloud_tpu_metadata):
+      with mock.patch.object(client.Client if client is not None else resolver.TPUClusterResolver, '_fetch_cloud_tpu_metadata', _fetch_cloud_tpu_metadata):
         result = yield
         return result
 
@@ -155,15 +189,59 @@ def reset_session(session=None, graph=None, interactive=True, **kws):
   return session2
 
 
+from tensorflow.core.protobuf import config_pb2
+from tensorflow.core.protobuf import rewriter_config_pb2
+from tensorflow.python.client import session
+from tensorflow.python.debug.lib import debug_data
+from tensorflow.python.debug.lib import debug_gradients
+from tensorflow.python.debug.lib import debug_utils
+from tensorflow.python.framework import ops
+from tensorflow.python.framework import test_util
+from tensorflow.python.lib.io import file_io
+from tensorflow.python.ops import gradients_impl
+from tensorflow.python.ops import math_ops
+from tensorflow.python.ops import variables
+from tensorflow.python.platform import googletest
+from tensorflow.python.training import gradient_descent
+
+
+
 if __name__ == '__main__':
   _tf_patch = patch_tensorflow_interactive()
   if len(sys.argv) <= 1:
     from tensorflow.core.protobuf import config_pb2
     import tensorflow as tf
-    tf.logging.set_verbosity('DEBUG')
+    tf.compat.v1.logging.set_verbosity('DEBUG')
     import numpy as np
     #session_config = config_pb2.ConfigProto(allow_soft_placement=True, isolate_session_state=True)
-    session_config = config_pb2.ConfigProto(allow_soft_placement=True, isolate_session_state=False)
+    rpc_options = config_pb2.RPCOptions()
+    # Setting cache_rpc_response to true will enable sender side caching of
+    # response for RecvTensorAsync and RecvBufAsync to allow receiver to retry
+    # requests . This is only necessary when the network fabric is experiencing a
+    # significant error rate.  Without it we'll fail a step on an network error,
+    # while with it we'll be able to complete long steps (like complex
+    # initializations) in the face of some network errors during RecvTensor.
+    rpc_options.cache_rpc_response = True
+
+    rewriter_config = rewriter_config_pb2.RewriterConfig(
+        disable_model_pruning=True,
+        disable_meta_optimizer=True,
+        dependency_optimization=rewriter_config_pb2.RewriterConfig.OFF,
+        fail_on_optimizer_errors=True,
+        )
+
+    graph_options = config_pb2.GraphOptions(
+        rewrite_options=rewriter_config,
+        place_pruned_graph=True,
+        infer_shapes=True,
+        )
+
+    session_config = config_pb2.ConfigProto(
+        graph_options=graph_options,
+        allow_soft_placement=True,
+        isolate_session_state=False,
+        )
+    
     master = None
     res = None
     cluster_spec = None
@@ -197,6 +275,8 @@ if __name__ == '__main__':
     print(cluster_def)
     print('cores: %d ip: %s' % (num_cores, master))
     r = sess.run
+    from importlib import reload
+    import tf_tools as tft
     from tensorflow.python.tpu import tpu as tpu_ops
     from tensorflow.compiler.tf2xla.python import xla
     from tensorflow.compiler.tf2xla.ops import gen_xla_ops
@@ -238,4 +318,5 @@ if __name__ == '__main__':
       source = f.read()
     code = compile(source, filename, 'exec')
     exec(code, globals(), globals())
+
 
