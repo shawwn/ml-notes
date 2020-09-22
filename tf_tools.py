@@ -27,10 +27,13 @@ def count_tpu_cores(session=None):
 
 import functools
 
-def tpu_shard(op, num_shards=None, **kws):
+def tpu_shard(op, num_shards=None, device_assignment=None, outputs_from_all_shards=True, **kws):
   if num_shards is None:
-    num_shards = count_tpu_cores()
-  return tpu.shard(op, num_shards=num_shards, **kws)
+    if device_assignment is not None:
+      num_shards = len(device_assignment.core_assignment)
+    else:
+      num_shards = count_tpu_cores()
+  return tpu.shard(op, outputs_from_all_shards=outputs_from_all_shards, num_shards=num_shards, device_assignment=device_assignment, **kws)
 
 def tpu_id():
   # TODO(iamtingchen): more elegant way to convert u32 to s32 for replica_id.
