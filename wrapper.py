@@ -211,6 +211,7 @@ if __name__ == '__main__':
   if len(sys.argv) <= 1:
     from tensorflow.core.protobuf import config_pb2
     import tensorflow as tf
+    tf1 = tf.compat.v1
     tf.compat.v1.logging.set_verbosity('DEBUG')
     import numpy as np
     #session_config = config_pb2.ConfigProto(allow_soft_placement=True, isolate_session_state=True)
