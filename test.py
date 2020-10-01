@@ -337,7 +337,6 @@ class GBlock(nn.Module):
 
       if self.downsample:
         #out = F.avg_pool2d(out, 2)
-        import pdb; pdb.set_trace()
         out = F.downsample(out)
 
       if self.skip_proj:
@@ -347,7 +346,6 @@ class GBlock(nn.Module):
           skip = F.upsample(skip)
         skip = self.conv_sc(skip)
         if self.downsample:
-          import pdb; pdb.set_trace()
           #skip = F.avg_pool2d(skip, 2)
           skip = F.downsample(skip)
       else:
@@ -411,7 +409,6 @@ class Generator256(nn.Module):
       with self.scope('G_Z'):
         out = self.G_linear(codes[0])
       out = nn.view(out, -1, 4, 4, self.first_view)
-      #out = nn.permute(out, 0, 3, 1, 2)
       for i, (code, GBlock) in enumerate(zip(codes[1:], self.GBlock)):
         if i == self.sa_id:
           out = self.attention(out)
@@ -428,10 +425,211 @@ class Generator256(nn.Module):
   
 
 
+class Discriminator256(nn.Module):
+  def __init__(self, n_class=1000, chn=96, debug=False, scope='Discriminator', **kwargs):
+    super().__init__(scope=scope, **kwargs)
+
+    with self.scope():
+
+      def conv(in_channel, out_channel, downsample=True, **kwargs):
+        return GBlock(in_channel, out_channel, bn=False, upsample=False, downsample=downsample, **kwargs)
+
+      if debug:
+        chn = 8
+      self.debug = debug
+
+      with self.scope('pre_conv'):
+        self.pre_conv = nn.Sequential(
+          SpectralNorm(nn.Conv2d(3, 1 * chn, 3, padding=1, index=0)),
+          nn.ReLU(index=1),
+          SpectralNorm(nn.Conv2d(1 * chn, 1 * chn, 3, padding=1, index=2)),
+          nn.AvgPool2d(2, index=3),
+        )
+      self.pre_skip = SpectralNorm(nn.Conv2d(3, 1 * chn, 1, scope='pre_skip'))
+
+      with self.scope('conv'):
+        self.conv = nn.Sequential(
+          conv(1 * chn, 2 * chn, downsample=True, index=0),
+          SelfAttention(2 * chn, index=0),
+          conv(2 * chn, 2 * chn, downsample=True, index=1),
+          conv(2 * chn, 4 * chn, downsample=True, index=2),
+          conv(4 * chn, 8 * chn, downsample=True, index=3),
+          conv(8 * chn, 8 * chn, downsample=True, index=4),
+          conv(8 * chn, 16 * chn, downsample=True, index=5),
+          conv(16 * chn, 16 * chn, downsample=False, index=6),
+        )
+
+      self.linear = SpectralNorm(nn.Linear(16 * chn, 1, scope='linear'))
+
+      self.embed = nn.Embedding(n_class, 16 * chn, scope='embed')
+      #self.embed.weight.data.uniform_(-0.1, 0.1) # TODO
+      self.embed = SpectralNorm(self.embed)
+
+  def forward(self, input, class_id):
+    with self.scope():
+
+      out = self.pre_conv(input)
+      out += self.pre_skip(F.avg_pool2d(input, 2))
+      out = self.conv(out)
+      out = F.relu(out)
+      out = nn.view(out, nn.size(out, 0), -1, nn.size(out, -1))
+      out = nn.sum(out, 1)
+      out = self.linear(out)
+      out_linear = nn.squeeze(out, 1)
+      if False:
+        unhot = tf.argmax(class_id, axis=-1)
+        embed = self.embed(unhot)
+      else:
+        embed = tf.matmul(class_id, self.embed.module.weight)
+
+      prod = nn.sum(out * embed, 1)
+
+      return out_linear + prod
+    
+
+
+class Generator512(nn.Module):
+  def __init__(self, code_dim=128, n_class=1000, chn=96, debug=False, scope='Generator', **kwargs):
+    super(Generator512, self).__init__(scope=scope, **kwargs)
+    self.linear = nn.Linear(n_class, 128, bias=False)
+    with self.scope():
+
+      if debug:
+        chn = 8
+
+      self.first_view = 16 * chn
+
+      with self.scope('G_Z'):
+        self.G_linear = SpectralNorm(nn.Linear(16, 4 * 4 * 16 * chn, scope="G_linear"))
+
+      z_dim = code_dim + 16
+
+      #self.GBlock = nn.ModuleList([
+      # self.GBlock = ([
+      #   GBlock(16 * chn, 16 * chn, n_class=n_class, z_dim=z_dim, index=0),
+      #   GBlock(16 * chn, 8 * chn, n_class=n_class, z_dim=z_dim, index=1),
+      #   GBlock(8 * chn, 8 * chn, n_class=n_class, z_dim=z_dim, index=2),
+      #   GBlock(8 * chn, 4 * chn, n_class=n_class, z_dim=z_dim, index=3),
+      #   GBlock(4 * chn, 2 * chn, n_class=n_class, z_dim=z_dim, index=4),
+      #   GBlock(2 * chn, 1 * chn, n_class=n_class, z_dim=z_dim, index=5),
+      # ])
+      #self.sa_id = 5
+
+      self.GBlock = ([
+        GBlock(16 * chn, 16 * chn, n_class=n_class, z_dim=z_dim, index=0),
+        GBlock(16 * chn, 8 * chn, n_class=n_class, z_dim=z_dim, index=1),
+        GBlock(8 * chn, 8 * chn, n_class=n_class, z_dim=z_dim, index=2),
+        GBlock(8 * chn, 4 * chn, n_class=n_class, z_dim=z_dim, index=3),
+      ])
+      self.sa_id = len(self.GBlock)
+      assert self.sa_id == 4
+      self.attention = SelfAttention(4 * chn)
+      self.GBlock += ([
+        GBlock(4 * chn, 2 * chn, n_class=n_class, z_dim=z_dim, index=4),
+        GBlock(2 * chn, 1 * chn, n_class=n_class, z_dim=z_dim, index=5),
+        GBlock(1 * chn, 1 * chn, n_class=n_class, z_dim=z_dim, index=6),
+      ])
+
+      self.num_split = len(self.GBlock) + 1
+
+      self.ScaledCrossReplicaBN = ScaledCrossReplicaBN(1 * chn, eps=1e-4)
+      self.colorize = SpectralNorm(nn.Conv2d(1 * chn, 3, [3, 3], padding=1, scope='conv_2d'))
+      
+      
+
+  def forward(self, input, class_id):
+    with self.scope():
+      codes = tf.split(input, self.num_split, 1)
+      class_emb = self.linear(class_id) # 128
+
+      with self.scope('G_Z'):
+        out = self.G_linear(codes[0])
+      out = nn.view(out, -1, 4, 4, self.first_view)
+      for i, (code, GBlock) in enumerate(zip(codes[1:], self.GBlock)):
+        if i == self.sa_id:
+          out = self.attention(out)
+        condition = nn.cat([code, class_emb], 1)
+        print(condition)
+        out = GBlock(out, condition)
+        print(out)
+
+      out = self.ScaledCrossReplicaBN(out)
+      out = F.relu(out)
+      out = self.colorize(out)
+
+      return tf.tanh(out)
+  
+
+
+class Discriminator512(nn.Module):
+  def __init__(self, n_class=1000, chn=96, debug=False, scope='Discriminator', **kwargs):
+    super().__init__(scope=scope, **kwargs)
+
+    with self.scope():
+
+      def conv(in_channel, out_channel, downsample=True, **kwargs):
+        return GBlock(in_channel, out_channel, bn=False, upsample=False, downsample=downsample, **kwargs)
+
+      if debug:
+        chn = 8
+      self.debug = debug
+
+      with self.scope('pre_conv'):
+        self.pre_conv = nn.Sequential(
+          SpectralNorm(nn.Conv2d(3, 1 * chn, 3, padding=1, index=0)),
+          nn.ReLU(index=1),
+          SpectralNorm(nn.Conv2d(1 * chn, 1 * chn, 3, padding=1, index=2)),
+          nn.AvgPool2d(2, index=3),
+        )
+      self.pre_skip = SpectralNorm(nn.Conv2d(3, 1 * chn, 1, scope='pre_skip'))
+
+      with self.scope('conv'):
+        self.conv = nn.Sequential(
+          conv(1 * chn, 1 * chn, downsample=True, index=0),
+          conv(1 * chn, 2 * chn, downsample=True, index=1),
+          SelfAttention(2 * chn, index=1),
+          conv(2 * chn, 2 * chn, downsample=True, index=2),
+          conv(2 * chn, 4 * chn, downsample=True, index=3),
+          conv(4 * chn, 8 * chn, downsample=True, index=4),
+          conv(8 * chn, 8 * chn, downsample=True, index=5),
+          conv(8 * chn, 16 * chn, downsample=True, index=6),
+          conv(16 * chn, 16 * chn, downsample=False, index=7),
+        )
+
+      self.linear = SpectralNorm(nn.Linear(16 * chn, 1, scope='linear'))
+
+      self.embed = nn.Embedding(n_class, 16 * chn, scope='embed')
+      #self.embed.weight.data.uniform_(-0.1, 0.1) # TODO
+      self.embed = SpectralNorm(self.embed)
+
+  def forward(self, input, class_id):
+    with self.scope():
+
+      out = self.pre_conv(input)
+      out += self.pre_skip(F.avg_pool2d(input, 2))
+      out = self.conv(out)
+      out = F.relu(out)
+      out = nn.view(out, nn.size(out, 0), -1, nn.size(out, -1))
+      out = nn.sum(out, 1)
+      out = self.linear(out)
+      out_linear = nn.squeeze(out, 1)
+      if False:
+        unhot = tf.argmax(class_id, axis=-1)
+        embed = self.embed(unhot)
+      else:
+        embed = tf.matmul(class_id, self.embed.module.weight)
+
+      prod = nn.sum(out * embed, 1)
+
+      return out_linear + prod
+
+
+
 class BigGAN256(nn.Module):
-  def __init__(self, scope='module', **kwargs):
+  def __init__(self, scope='module', disc=False, **kwargs):
     super(BigGAN256, self).__init__(scope=scope, **kwargs)
     with self.scope():
+      self.discriminator = Discriminator256() if disc else None
       self.generator = Generator256()
       def ema_getter(getter, name, *args, **kwargs):
         #print('ema_getter', name, *args, kwargs)
@@ -443,6 +641,25 @@ class BigGAN256(nn.Module):
         return var
       with tf.variable_scope("", reuse=True, custom_getter=ema_getter):
         self.ema_generator = Generator256()
+      
+
+
+class BigGAN512(nn.Module):
+  def __init__(self, scope='module', disc=False, **kwargs):
+    super(BigGAN512, self).__init__(scope=scope, **kwargs)
+    with self.scope():
+      self.discriminator = Discriminator512() if disc else None
+      self.generator = Generator512()
+      def ema_getter(getter, name, *args, **kwargs):
+        #print('ema_getter', name, *args, kwargs)
+        v = name.split('/')[-1]
+        if v in ['w', 'b', 'beta', 'gamma']:
+          #print('EMA', name + '/ema_b999900')
+          name = name + '/ema_b999900'
+        var = getter(name, *args, **kwargs)
+        return var
+      with tf.variable_scope("", reuse=True, custom_getter=ema_getter):
+        self.ema_generator = Generator512()
       
 
 
@@ -484,7 +701,7 @@ class SpectralNorm(nn.Module):
       w = self._make_params()
     epsilon = self.epsilon
     w = getattr(self.module, self.name)
-    w = w.read_value()
+    w = val(w)
     assert len(shapelist(w)) > 1
     shape = shapelist(w)
     ushape = [1, shape[-1]]
