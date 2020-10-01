@@ -476,11 +476,7 @@ class Discriminator256(nn.Module):
       out = nn.sum(out, 1)
       out = self.linear(out)
       out_linear = nn.squeeze(out, 1)
-      if False:
-        unhot = tf.argmax(class_id, axis=-1)
-        embed = self.embed(unhot)
-      else:
-        embed = tf.matmul(class_id, self.embed.module.weight)
+      embed = self.embed(class_id)
 
       prod = nn.sum(out * embed, 1)
 

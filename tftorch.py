@@ -1555,12 +1555,16 @@ class Embedding(Module):
       self.weight = self.globalvar('w', shape=[num_embeddings, embedding_dim])
 
   def forward(self, input):
-    if input.dtype not in [tf.int32, tf.int64]:
-      input = tf.cast(input, tf.int32)
     return embedding(input, self.weight, max_norm=self.max_norm)
 
 
 def embedding(input, params, max_norm=None, name=None):
-  return tf.nn.embedding_lookup(params, input, max_norm=max_norm, name=name)
+  if False:
+    if input.dtype not in [tf.int32, tf.int64]:
+      input = tf.cast(input, tf.int32)
+    unhot = tf.argmax(input, axis=-1)
+    return tf.nn.embedding_lookup(params, input, max_norm=max_norm, name=name)
+  else:
+    return tf.matmul(input, params)
 
 
