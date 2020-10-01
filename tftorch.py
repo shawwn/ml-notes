@@ -602,6 +602,14 @@ def cat(x, axis, name=None):
   return tf.concat(x, axis=axis, name=name)
 
 
+def squeeze(x, axis=None, name=None):
+  return tf.squeeze(x, axis=axis, name=name)
+
+
+def sum(x, axis, name=None):
+  return tf.reduce_sum(x, axis=axis)
+
+
 def numel(tensor):
   if isinstance(tensor, tuple):
     tensor = [x for x in tensor]
@@ -1098,6 +1106,36 @@ class MaxPool2d(Module):
     return max_pool2d(input, self.kernel_size, self.stride, self.padding)
 
 
+def avg_pool2d(input, kernel_size, stride=None, padding=0, data_format="NHWC", name=None):
+  kernel_size = _pair(kernel_size)
+  strides = _pair(kernel_size if stride is None else stride)
+  #padding = padding or "SAME"
+  if padding == 0:
+    padding = "VALID"
+  elif padding == 1:
+    padding = "SAME"
+  else:
+    padding = _pair(padding)
+  print('avg_pool2d', padding)
+  return tf.nn.avg_pool2d(input, kernel_size, strides, padding, data_format, name=name)
+  #return tf.nn.pool(input, kernel_size, "AVG", "SAME", strides=strides, name=name)
+
+
+class AvgPool2d(Module):
+  def __init__(self,
+      kernel_size,
+      stride=None,
+      padding=0,
+      scope='avg_pool2d',
+      **kwargs):
+    super().__init__(scope=scope, **kwargs)
+    self.kernel_size = _pair(kernel_size)
+    self.stride = _pair(kernel_size if stride is None else stride)
+    self.padding = padding
+  def forward(self, input):
+    return avg_pool2d(input, self.kernel_size, self.stride, self.padding)
+
+
 def softmax(input, dim, name=None):
   return tf.nn.softmax(input, axis=dim, name=name)
 
@@ -1504,5 +1542,25 @@ class BatchNorm3d(_BatchNorm):
         if dim(input) != 5:
             raise ValueError('expected 5D input (got {}D input)'
                              .format(dim(input)))
+
+
+
+class Embedding(Module):
+  def __init__(self, num_embeddings, embedding_dim, max_norm=None, scope=None, **kwargs):
+    super().__init__(scope=scope, **kwargs)
+    self.num_embeddings = num_embeddings
+    self.embedding_dim = embedding_dim
+    self.max_norm = max_norm
+    with self.scope():
+      self.weight = self.globalvar('w', shape=[num_embeddings, embedding_dim])
+
+  def forward(self, input):
+    if input.dtype not in [tf.int32, tf.int64]:
+      input = tf.cast(input, tf.int32)
+    return embedding(input, self.weight, max_norm=self.max_norm)
+
+
+def embedding(input, params, max_norm=None, name=None):
+  return tf.nn.embedding_lookup(params, input, max_norm=max_norm, name=name)
 
 
