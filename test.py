@@ -10,7 +10,7 @@ from functools import partial
 
 class TestModule(nn.Module):
   def __init__(self, scope=None):
-    super(TestModule, self).__init__(scope=scope)
+    super().__init__(scope=scope)
     #self.v = tf.Variable(tf.zeros([8]), name='v', use_resource=True, trainable=False, collections=['local_variables'])
     with self.scope():
       #self.v = tft.localvar('v', shape=[8])
@@ -55,7 +55,7 @@ class SelfAttention(nn.Module):
   """ Self Attention Layer"""
 
   def __init__(self, in_dim, activation=F.relu, scope='attention', **kwargs):
-    super(SelfAttention, self).__init__(scope=scope, **kwargs)
+    super().__init__(scope=scope, **kwargs)
     with self.scope():
       self.channel_in = in_dim
       self.activation = activation
@@ -71,7 +71,7 @@ class SelfAttention(nn.Module):
 
     self.softmax = nn.Softmax(dim=-1)
 
-  def forward(self, x):
+  def forward(self, x, y=None): # ignore y (class embedding)
     with self.scope():
       m_batchsize, width, height, C = nn.size(x)
       N = height * width
@@ -99,51 +99,51 @@ def val(x):
     return tf.identity(x, name='read')
 
 
-def batchnorm(input, mean, variance, gamma, beta, epsilon=9.999999747378752e-05):
-  return tf.nn.batch_normalization(input, mean, variance, scale=gamma, offset=beta, variance_epsilon=epsilon)
-  # return F.batch_norm(input, mean=mean, variance=variance, weight=gamma, bias=beta, training=False, exponential_average_factor=0.1, variance_epsilon=epsilon)
+def batchnorm(input, mean, variance, scale, offset, epsilon=9.999999747378752e-05):
+  return tf.nn.batch_normalization(input, mean, variance, scale=scale, offset=offset, variance_epsilon=epsilon)
+  # return F.batch_norm(input, mean=mean, variance=variance, weight=scale, bias=offset, training=False, exponential_average_factor=0.1, variance_epsilon=epsilon)
   # mean_v = val(mean)
   # var_v = val(variance)
   # inv_var = tf.math.rsqrt(var_v + epsilon)
-  # gamma = val(gamma) if gamma is not None else 1.0
-  # x0 = inv_var * gamma
+  # scale = val(scale) if scale is not None else 1.0
+  # x0 = inv_var * scale
   # x1 = input * x0
   # x2 = mean_v * x1
-  # beta = val(beta) if beta is not None else 0.0
-  # x3 = beta - x2
+  # offset = val(offset) if offset is not None else 0.0
+  # x3 = offset - x2
   # x4 = x1 + x3
   # return x4
 
 
 class ConditionalBatchNorm2d(nn.Module):
-  def __init__(self, num_features, num_classes, eps=1e-4, momentum=0.1, scope='HyperBN', **kwargs):
-    super(ConditionalBatchNorm2d, self).__init__(scope=scope, **kwargs)
+  def __init__(self, num_features, num_classes, eps=1e-4, momentum=0.1, scope='HyperBN', bn_scope='CrossReplicaBN', gamma_scope='gamma', beta_scope='beta', **kwargs):
+    super().__init__(scope=scope, **kwargs)
     with self.scope():
       self.num_features = num_features
-      self.gamma_embed = SpectralNorm(nn.Linear(num_classes, num_features, bias=False, scope='gamma'))
-      self.beta_embed = SpectralNorm(nn.Linear(num_classes, num_features, bias=False, scope='beta'))
-    self.bn = nn.BatchNorm2d(num_features, affine=False, eps=eps, momentum=momentum, scope='CrossReplicaBN', **kwargs)
+      self.gamma_embed = SpectralNorm(nn.Linear(num_classes, num_features, bias=False, scope=gamma_scope))
+      self.beta_embed = SpectralNorm(nn.Linear(num_classes, num_features, bias=False, scope=beta_scope))
+    self.bn = nn.BatchNorm2d(num_features, affine=False, eps=eps, momentum=momentum, scope=bn_scope, **kwargs)
 
   def forward(self, x, y):
     with self.scope():
-      gamma = self.gamma_embed(y) + 1
-      beta = self.beta_embed(y)
-      out = batchnorm(x, mean=self.bn.accumulated_mean, variance=self.bn.accumulated_var, gamma=gamma, beta=beta)
+      scale = self.gamma_embed(y) + 1
+      offset = self.beta_embed(y)
+      out = batchnorm(x, mean=self.bn.accumulated_mean, variance=self.bn.accumulated_var, scale=scale, offset=offset)
       return out
 
 
 class ScaledCrossReplicaBN(nn.Module):
-  def __init__(self, num_features, eps=1e-4, momentum=0.1, scope='ScaledCrossReplicaBN', **kwargs):
-    super(ScaledCrossReplicaBN, self).__init__(scope=scope, **kwargs)
+  def __init__(self, num_features, eps=1e-4, momentum=0.1, scope='ScaledCrossReplicaBN', bn_scope_suffix='bn', scale_name='gamma', offset_name='beta', **kwargs):
+    super().__init__(scope=scope, **kwargs)
     with self.scope():
       self.num_features = num_features
-      self.beta = self.globalvar('beta', shape=[1, 1, 1, self.num_features])
-      self.gamma = self.globalvar('gamma', shape=[1, 1, 1, self.num_features])
-    self.bn = nn.BatchNorm2d(num_features, affine=False, eps=eps, momentum=momentum, scope=scope+'bn', **kwargs)
+      self.scale = self.globalvar(scale_name, shape=[1, 1, 1, self.num_features])
+      self.offset = self.globalvar(offset_name, shape=[1, 1, 1, self.num_features])
+    self.bn = nn.BatchNorm2d(num_features, affine=False, eps=eps, momentum=momentum, scope=scope+bn_scope_suffix, **kwargs)
 
   def forward(self, input):
     with self.scope():
-      out = batchnorm(input, mean=self.bn.accumulated_mean, variance=self.bn.accumulated_var, gamma=self.gamma, beta=self.beta)
+      out = batchnorm(input, mean=self.bn.accumulated_mean, variance=self.bn.accumulated_var, scale=self.scale, offset=self.offset)
       return out
 
 
@@ -163,7 +163,7 @@ class GBlock(nn.Module):
       z_dim=148,
       scope=None,
       **kwargs):
-    super(GBlock, self).__init__(scope=scope, **kwargs)
+    super().__init__(scope=scope, **kwargs)
     with self.scope():
       if bn:
         self.HyperBN = ConditionalBatchNorm2d(in_channel, z_dim, index=0)
@@ -224,7 +224,7 @@ class GBlock(nn.Module):
 
 class Generator256(nn.Module):
   def __init__(self, code_dim=140, n_class=1000, chn=96, debug=False, scope='Generator', **kwargs):
-    super(Generator256, self).__init__(scope=scope, **kwargs)
+    super().__init__(scope=scope, **kwargs)
     self.linear = nn.Linear(n_class, 128, bias=False)
     with self.scope():
 
@@ -336,7 +336,7 @@ class Discriminator256(nn.Module):
 
 class Generator512(nn.Module):
   def __init__(self, code_dim=128, n_class=1000, chn=96, debug=False, scope='Generator', **kwargs):
-    super(Generator512, self).__init__(scope=scope, **kwargs)
+    super().__init__(scope=scope, **kwargs)
     self.linear = nn.Linear(n_class, 128, bias=False)
     with self.scope():
 
@@ -350,31 +350,17 @@ class Generator512(nn.Module):
 
       z_dim = code_dim + 16
 
-      #self.GBlock = nn.ModuleList([
-      # self.GBlock = ([
-      #   GBlock(16 * chn, 16 * chn, n_class=n_class, z_dim=z_dim, index=0),
-      #   GBlock(16 * chn, 8 * chn, n_class=n_class, z_dim=z_dim, index=1),
-      #   GBlock(8 * chn, 8 * chn, n_class=n_class, z_dim=z_dim, index=2),
-      #   GBlock(8 * chn, 4 * chn, n_class=n_class, z_dim=z_dim, index=3),
-      #   GBlock(4 * chn, 2 * chn, n_class=n_class, z_dim=z_dim, index=4),
-      #   GBlock(2 * chn, 1 * chn, n_class=n_class, z_dim=z_dim, index=5),
-      # ])
-      #self.sa_id = 5
-
-      self.GBlock = ([
-        GBlock(16 * chn, 16 * chn, n_class=n_class, z_dim=z_dim, index=0),
-        GBlock(16 * chn, 8 * chn, n_class=n_class, z_dim=z_dim, index=1),
-        GBlock(8 * chn, 8 * chn, n_class=n_class, z_dim=z_dim, index=2),
-        GBlock(8 * chn, 4 * chn, n_class=n_class, z_dim=z_dim, index=3),
-      ])
+      self.GBlock = []
+      self.GBlock += [GBlock(16 * chn, 16 * chn, n_class=n_class, z_dim=z_dim, index=0)]
+      self.GBlock += [GBlock(16 * chn, 8 * chn, n_class=n_class, z_dim=z_dim, index=1)]
+      self.GBlock += [GBlock(8 * chn, 8 * chn, n_class=n_class, z_dim=z_dim, index=2)]
+      self.GBlock += [GBlock(8 * chn, 4 * chn, n_class=n_class, z_dim=z_dim, index=3)]
       self.sa_id = len(self.GBlock)
       assert self.sa_id == 4
-      self.attention = SelfAttention(4 * chn)
-      self.GBlock += ([
-        GBlock(4 * chn, 2 * chn, n_class=n_class, z_dim=z_dim, index=4),
-        GBlock(2 * chn, 1 * chn, n_class=n_class, z_dim=z_dim, index=5),
-        GBlock(1 * chn, 1 * chn, n_class=n_class, z_dim=z_dim, index=6),
-      ])
+      self.attention = SelfAttention(2 * chn)
+      self.GBlock += [GBlock(4 * chn, 2 * chn, n_class=n_class, z_dim=z_dim, index=4)]
+      self.GBlock += [GBlock(2 * chn, 1 * chn, n_class=n_class, z_dim=z_dim, index=5)]
+      self.GBlock += [GBlock(1 * chn, 1 * chn, n_class=n_class, z_dim=z_dim, index=6)]
 
       self.num_split = len(self.GBlock) + 1
 
@@ -468,7 +454,7 @@ class Discriminator512(nn.Module):
 
 class BigGAN256(nn.Module):
   def __init__(self, scope='module', disc=False, **kwargs):
-    super(BigGAN256, self).__init__(scope=scope, **kwargs)
+    super().__init__(scope=scope, **kwargs)
     with self.scope():
       self.discriminator = Discriminator256() if disc else None
       self.generator = Generator256()
@@ -485,7 +471,7 @@ class BigGAN256(nn.Module):
 
 class BigGAN512(nn.Module):
   def __init__(self, scope='module', disc=False, **kwargs):
-    super(BigGAN512, self).__init__(scope=scope, **kwargs)
+    super().__init__(scope=scope, **kwargs)
     with self.scope():
       self.discriminator = Discriminator512() if disc else None
       self.generator = Generator512()
@@ -497,7 +483,174 @@ class BigGAN512(nn.Module):
         return var
       with tf.variable_scope("", reuse=True, custom_getter=ema_getter):
         self.ema_generator = Generator512()
+
+
+
+
+
+
+# BigGAN-deep: uses a different resblock and pattern
+
+
+# Architectures for G
+# Attention is passed in in the format '32_64' to mean applying an attention
+# block at both resolution 32x32 and 64x64. Just '64' will apply at 64x64.
+
+class DeepGBlock(nn.Module):
+  def __init__(
+      self,
+      in_channels,
+      out_channels,
+      z_dim,
+      which_conv=nn.Conv2d,
+      which_bn=ConditionalBatchNorm2d,
+      activation=F.relu,
+      upsample=None,
+      channel_ratio=4,
+      scope='GBlock',
+      **kwargs):
+    super().__init__(scope=scope, **kwargs)
+    if upsample is None and in_channels != out_channels:
+      upsample = True
+    with self.scope():
+      self.in_channels = in_channels
+      self.out_channels = out_channels
+      self.hidden_channels = self.in_channels // channel_ratio
+      self.which_conv = partial(which_conv, scope='conv')
+      self.which_bn = partial(which_bn, scope='BatchNorm', bn_scope='BatchNorm', gamma_scope='scale', beta_scope='offset')
+      self.activation = activation
+      self.bn1 = self.which_bn(self.in_channels, z_dim, index=0)
+      self.conv1 = self.which_conv(self.in_channels, self.hidden_channels, kernel_size=1, padding=0, scope='conv0')
+      self.bn2 = self.which_bn(self.hidden_channels, z_dim, index=1)
+      self.conv2 = self.which_conv(self.hidden_channels, self.hidden_channels, kernel_size=3, padding=1, scope='conv1')
+      self.bn3 = self.which_bn(self.hidden_channels, z_dim, index=2)
+      self.conv3 = self.which_conv(self.hidden_channels, self.hidden_channels, kernel_size=3, padding=1, scope='conv2')
+      self.bn4 = self.which_bn(self.hidden_channels, z_dim, index=3)
+      self.conv4 = self.which_conv(self.hidden_channels, self.out_channels, kernel_size=1, padding=0, scope='conv3')
+      # upsample layers
+      if upsample is True:
+        self.upsample = F.upsample
+      else:
+        self.upsample = upsample
+
+  def forward(self, x, y):
+    with self.scope():
+      # Project down to channel ratio
+      h = self.conv1(self.activation(self.bn1(x, y)))
+      # Apply next BN-ReLU
+      h = self.activation(self.bn2(h, y))
+      # Drop channels in x if necessary
+      if self.in_channels != self.out_channels:
+        x = x[:, :, :, :self.out_channels]      
+      # Upsample both h and x at this point  
+      if self.upsample:
+        h = self.upsample(h)
+        x = self.upsample(x)
+      # 3x3 convs
+      h = self.conv2(h)
+      h = self.conv3(self.activation(self.bn3(h, y)))
+      # Final 1x1 conv
+      h = self.conv4(self.activation(self.bn4(h, y)))
+      return h + x
+
+
+class DeepGenerator512(nn.Module):
+  def __init__(self, dim_z=128, shared_dim=0, n_class=1000, chn=128, hier=True, debug=False, scope='Generator', **kwargs):
+    super().__init__(scope=scope, **kwargs)
+    self.hier = hier
+    # Dimensionality of the shared embedding? Unused if not using G_shared
+    self.shared_dim = shared_dim if shared_dim > 0 else dim_z
+    self.linear = nn.Linear(n_class, 128, bias=False)
+    with self.scope():
+
+      if debug:
+        chn = 8
+
+      self.first_view = 16 * chn
+
+      z_dim = dim_z + self.shared_dim
+
+      with self.scope('GenZ'):
+        self.G_linear = SpectralNorm(nn.Linear(z_dim, 4 * 4 * 16 * chn, scope="G_linear"))
+
+      def conv(in_channel, out_channel, *, index, **kwargs):
+        if index % 2 == 0:
+          upsample = False
+        else:
+          upsample = True
+        return DeepGBlock(in_channel, out_channel, z_dim=z_dim, upsample=upsample, index=index, **kwargs)
+
+
+      self.conv = nn.Sequential(
+        conv(16 * chn, 16 * chn, index=0),
+        conv(16 * chn, 16 * chn, index=1),
+        conv(16 * chn, 16 * chn, index=2),
+        conv(16 * chn, 8 * chn, index=3),
+        conv(8 * chn, 8 * chn, index=4),
+        conv(8 * chn, 8 * chn, index=5),
+        conv(8 * chn, 8 * chn, index=6),
+        conv(8 * chn, 4 * chn, index=7),
+        SelfAttention(4 * chn),
+        conv(4 * chn, 4 * chn, index=8),
+        conv(4 * chn, 2 * chn, index=9),
+        conv(2 * chn, 2 * chn, index=10),
+        conv(2 * chn, 1 * chn, index=11),
+        conv(1 * chn, 1 * chn, index=12),
+        conv(1 * chn, 1 * chn, index=13),
+      )
+
+      self.ScaledCrossReplicaBN = ScaledCrossReplicaBN(1 * chn, eps=1e-4, scope='BatchNorm', bn_scope_suffix='', scale_name='scale', offset_name='offset')
+      self.colorize = SpectralNorm(nn.Conv2d(1 * chn, chn, [3, 3], padding=1, scope='conv_to_rgb'))
       
+      
+
+  def forward(self, z, y):
+    with self.scope():
+      y = self.linear(y) # 128
+
+      # If hierarchical, concatenate zs and ys
+      if self.hier:
+        z = nn.cat([y, z], 1)
+        y = z
+
+      with self.scope('GenZ'):
+        h = self.G_linear(z)
+      h = nn.view(h, nn.size(h, 0), 4, 4, -1)
+
+      h = self.conv(h, y)
+
+      h = self.ScaledCrossReplicaBN(h)
+      h = F.relu(h)
+      h = self.colorize(h)
+
+      # take rgb channels
+      h = h[:, :, :, :3]
+
+      return tf.tanh(h)
+
+
+
+
+class BigGANDeep512(nn.Module):
+  def __init__(self, scope='module', disc=False, ema=True, **kwargs):
+    super().__init__(scope=scope, **kwargs)
+    with self.scope():
+      self.discriminator = DeepDiscriminator512() if disc else None
+      self.generator = DeepGenerator512()
+      if ema:
+        def ema_getter(getter, name, *args, **kwargs):
+          v = name.split('/')[-1]
+          if v in ['w', 'b', 'scale', 'offset']:
+            name = name + '/ema_0.9999'
+          var = getter(name, *args, **kwargs)
+          return var
+        with tf.variable_scope("", reuse=True, custom_getter=ema_getter):
+          self.ema_generator = DeepGenerator512()
+      else:
+        self.ema_generator = self.generator
+
+
+
 
 
 assert_shape = nn.assert_shape
@@ -506,7 +659,7 @@ shapelist = nn.shapelist
 
 class SpectralNorm(nn.Module):
   def __init__(self, module, name='weight', epsilon=9.999999747378752e-05, update=None, scope=None, **kwargs):
-    super(SpectralNorm, self).__init__(scope=scope, **kwargs)
+    super().__init__(scope=scope, **kwargs)
     self.module = module
     self.name = name
     self.epsilon = epsilon
@@ -1098,7 +1251,7 @@ class SpectralNorm(nn.Module):
       x93 = u2.read_value()
     with tf.control_dependencies([x88, x90, x92]):
       norm = tf.identity(x70, "norm")
-    w_normalized = tf.div(w_reshaped, norm)
+    w_normalized = tf.div(w_reshaped, norm, name="truediv")
     w_normalized = tf.reshape(w_normalized, shape)
     # if return_norm:
     #   return w_normalized, norm
