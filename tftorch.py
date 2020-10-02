@@ -401,9 +401,9 @@ class Sequential(Module):
     def __iter__(self) -> Iterator[Module]:
         return iter(self._modules.values())
 
-    def forward(self, input):
+    def forward(self, input, *args, **kwargs):
         for module in self:
-            input = module(input)
+            input = module(input, *args, **kwargs)
         return input
 
 
@@ -411,7 +411,8 @@ class Sequential(Module):
   
 class ReLU(Module):
   def forward(self, input):
-    return tf.nn.relu(input)
+    with self.scope():
+      return tf.nn.relu(input)
 
 
 class SquareFn(Function):
@@ -429,24 +430,28 @@ class SquareFn(Function):
 
 class Identity(Module):
   def forward(self, x):
-    return tf.identity(x)
+    with self.scope():
+      return tf.identity(x)
 
 
 class Square(Module):
   def forward(self, x):
-    return SquareFn.apply(x)
+    with self.scope():
+      return SquareFn.apply(x)
 
 
 class FooModel(Module):
   def __init__(self):
     super(FooModel, self).__init__()
-    self.square1 = Square()
-    self.square2 = Square()
+    with self.scope():
+      self.square1 = Square()
+      self.square2 = Square()
 
   def forward(self, x):
-    x = self.square1(x)
-    x = self.square2(x)
-    return x
+    with self.scope():
+      x = self.square1(x)
+      x = self.square2(x)
+      return x
 
 
 relu = tf.nn.relu
@@ -550,7 +555,8 @@ class Linear(Module):
             self.bias = uniform_(self.bias, -bound, bound)
 
     def forward(self, input: Tensor) -> Tensor:
-        return linear(input, self.weight, self.bias)
+        with self.scope():
+            return linear(input, self.weight, self.bias)
 
     def extra_repr(self) -> str:
         return 'in_features={}, out_features={}, bias={}'.format(
@@ -1018,7 +1024,8 @@ class Conv2d(_ConvNd):
         return output
 
     def forward(self, input):
-        return self._conv_forward(input, self.weight)
+        with self.scope():
+          return self._conv_forward(input, self.weight)
 
 
 
@@ -1048,10 +1055,9 @@ def unpool(value, name="unpool"):
   return out
 
 
-def unpool2(value, name="unpool"):
-  with tf.name_scope(name) as scope:
-    x = tf.concat([value, value, value, value], axis=3)
-    return tf.nn.depth_to_space(x, 2)
+def unpool2(value, name=None):
+  x = tf.concat([value, value, value, value], axis=3)
+  return tf.nn.depth_to_space(x, 2, name=name)
 
 
 def interpolate(input, scale_factor=2, name="interpolate"):
@@ -1099,11 +1105,13 @@ class MaxPool2d(Module):
       scope='max_pool2d',
       **kwargs):
     super().__init__(scope=scope, **kwargs)
-    self.kernel_size = _pair(kernel_size)
-    self.stride = _pair(stride)
-    self.padding = padding
+    with self.scope():
+      self.kernel_size = _pair(kernel_size)
+      self.stride = _pair(stride)
+      self.padding = padding
   def forward(self, input):
-    return max_pool2d(input, self.kernel_size, self.stride, self.padding)
+    with self.scope():
+      return max_pool2d(input, self.kernel_size, self.stride, self.padding)
 
 
 def avg_pool2d(input, kernel_size, stride=None, padding=0, data_format="NHWC", name=None):
@@ -1129,11 +1137,13 @@ class AvgPool2d(Module):
       scope='avg_pool2d',
       **kwargs):
     super().__init__(scope=scope, **kwargs)
-    self.kernel_size = _pair(kernel_size)
-    self.stride = _pair(kernel_size if stride is None else stride)
-    self.padding = padding
+    with self.scope():
+      self.kernel_size = _pair(kernel_size)
+      self.stride = _pair(kernel_size if stride is None else stride)
+      self.padding = padding
   def forward(self, input):
-    return avg_pool2d(input, self.kernel_size, self.stride, self.padding)
+    with self.scope():
+      return avg_pool2d(input, self.kernel_size, self.stride, self.padding)
 
 
 def softmax(input, dim, name=None):
@@ -1146,9 +1156,11 @@ class Softmax(Module):
       scope='softmax',
       **kwargs):
     super().__init__(scope=scope, **kwargs)
-    self.dim = dim
+    with self.scope():
+      self.dim = dim
   def forward(self, input):
-    return softmax(input, dim=self.dim)
+    with self.scope():
+      return softmax(input, dim=self.dim)
 
 
 def bmm(input, mat2, transpose_a=False, transpose_b=False, name=None):
@@ -1266,45 +1278,46 @@ class _BatchNorm(_NormBase):
             num_features, eps, momentum, affine, track_running_stats, scope=scope, **kwargs)
 
     def forward(self, input):
-        self._check_input_dim(input)
+        with self.scope():
+            self._check_input_dim(input)
 
-        # exponential_average_factor is set to self.momentum
-        # (when it is available) only so that it gets updated
-        # in ONNX graph when this node is exported to ONNX.
-        if self.momentum is None:
-            exponential_average_factor = 0.0
-        else:
-            exponential_average_factor = self.momentum
+            # exponential_average_factor is set to self.momentum
+            # (when it is available) only so that it gets updated
+            # in ONNX graph when this node is exported to ONNX.
+            if self.momentum is None:
+                exponential_average_factor = 0.0
+            else:
+                exponential_average_factor = self.momentum
 
-        if self.training and self.track_running_stats:
-            # TODO: if statement only here to tell the jit to skip emitting this when it is None
-            if self.accumulation_counter is not None:
-                self.accumulation_counter = self.accumulation_counter + 1
-                if self.momentum is None:  # use cumulative moving average
-                    exponential_average_factor = 1.0 / float(self.accumulation_counter)
-                else:  # use exponential moving average
-                    exponential_average_factor = self.momentum
+            if self.training and self.track_running_stats:
+                # TODO: if statement only here to tell the jit to skip emitting this when it is None
+                if self.accumulation_counter is not None:
+                    self.accumulation_counter = self.accumulation_counter + 1
+                    if self.momentum is None:  # use cumulative moving average
+                        exponential_average_factor = 1.0 / float(self.accumulation_counter)
+                    else:  # use exponential moving average
+                        exponential_average_factor = self.momentum
 
-        r"""
-        Decide whether the mini-batch stats should be used for normalization rather than the buffers.
-        Mini-batch stats are used in training mode, and in eval mode when buffers are None.
-        """
-        if self.training:
-            bn_training = True
-        else:
-            bn_training = (self.accumulated_mean is None) and (self.accumulated_var is None)
+            r"""
+            Decide whether the mini-batch stats should be used for normalization rather than the buffers.
+            Mini-batch stats are used in training mode, and in eval mode when buffers are None.
+            """
+            if self.training:
+                bn_training = True
+            else:
+                bn_training = (self.accumulated_mean is None) and (self.accumulated_var is None)
 
-        r"""
-        Buffers are only updated if they are to be tracked and we are in training mode. Thus they only need to be
-        passed when the update should occur (i.e. in training mode when they are tracked), or when buffer stats are
-        used for normalization (i.e. in eval mode when buffers are not None).
-        """
-        return batch_norm(
-            input,
-            # If buffers are not to be tracked, ensure that they won't be updated
-            self.accumulated_mean if not self.training or self.track_running_stats else None,
-            self.accumulated_var if not self.training or self.track_running_stats else None,
-            self.weight, self.bias, bn_training, exponential_average_factor, self.eps)
+            r"""
+            Buffers are only updated if they are to be tracked and we are in training mode. Thus they only need to be
+            passed when the update should occur (i.e. in training mode when they are tracked), or when buffer stats are
+            used for normalization (i.e. in eval mode when buffers are not None).
+            """
+            return batch_norm(
+                input,
+                # If buffers are not to be tracked, ensure that they won't be updated
+                self.accumulated_mean if not self.training or self.track_running_stats else None,
+                self.accumulated_var if not self.training or self.track_running_stats else None,
+                self.weight, self.bias, bn_training, exponential_average_factor, self.eps)
 
 
 def batch_norm(input, mean, variance, weight, bias, training, exponential_average_factor, variance_epsilon):
@@ -1552,7 +1565,8 @@ class Embedding(Module):
       self.weight = self.globalvar('w', shape=[num_embeddings, embedding_dim])
 
   def forward(self, input):
-    return embedding(input, self.weight, max_norm=self.max_norm)
+    with self.scope():
+      return embedding(input, self.weight, max_norm=self.max_norm)
 
 
 def embedding(input, params, max_norm=None, name=None):
