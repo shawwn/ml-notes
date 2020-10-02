@@ -348,12 +348,16 @@ def interpolate_or_clip(colormap, x):
   else: return interpolate(colormap, x)
 
 
-def remapv(x, bot=None, top=None, epsilon=0.0): #epsilon=1e-4):
+def is_tf_type(x):
+  return isinstance(x, tf.Tensor) or isinstance(x, tf.Variable)
+
+
+def remapv(x, bot=None, top=None):
   if bot is None:
-    bot = tf.reduce_min(x) if isinstance(x, tf.Tensor) else np.array(x).min()
+    bot = tf.reduce_min(x) if is_tf_type(x) else np.array(x).min()
   if top is None:
-    top = tf.reduce_max(x) if isinstance(x, tf.Tensor) else np.array(x).max()
-  return (x - bot) / (top - bot + epsilon)
+    top = tf.reduce_max(x) if is_tf_type(x) else np.array(x).max()
+  return (x - bot) / (top - bot)
 
 
 def clamp(v, min=0., max=1.):
@@ -738,11 +742,13 @@ y = tf.placeholder(tf.float32, [batch_size, n_class], name="y")
 import tensorflow_hub as hub
 module = hub.Module("gs://tpu-usc1/models/biggan-deep-512")
 
+r([tf.global_variables_initializer(), tf.local_variables_initializer()])
+
 op_offset = len(graph.get_operations())
 # Call BigGAN on a dict of the inputs to generate a batch of images with shape
 # [8, 512, 512, 3] and range [-1, 1].
 #samples = module(dict(y=y, z=z, truncation=truncation))
-samples = module(dict(y=y, z=z, truncation=truncation))
+samples = module(dict(y=y, z=z, truncation=1.0))
 op_final = len(graph.get_operations())
 
 
@@ -829,7 +835,10 @@ def datdisk(data, filename='bgd512_0.png' if deep else 'bg256_0.png'):
 
 pngs = fimg2png(samples[0])
 
+datdisk(r(pngs, {z: truncated_z_sample(batch_size, z_dim, truncation=0.5, seed=638), y: one_hot([598], n_class)}));
+
 import random
+
 
 datdisk(r(pngs, {z: truncated_z_sample(batch_size, z_dim, truncation=0.5, seed=random.randint(0, 1000)), y: one_hot([random.randint(0, 1000)], n_class)}));
 
