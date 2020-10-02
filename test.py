@@ -502,8 +502,6 @@ class DeepGBlock(nn.Module):
       in_channels,
       out_channels,
       z_dim,
-      which_conv=nn.Conv2d,
-      which_bn=ConditionalBatchNorm2d,
       activation=F.relu,
       upsample=None,
       channel_ratio=4,
@@ -516,17 +514,19 @@ class DeepGBlock(nn.Module):
       self.in_channels = in_channels
       self.out_channels = out_channels
       self.hidden_channels = self.in_channels // channel_ratio
-      self.which_conv = partial(which_conv, scope='conv')
-      self.which_bn = partial(which_bn, scope='BatchNorm', bn_scope='BatchNorm', gamma_scope='scale', beta_scope='offset')
+      def conv(in_channel, out_channel, **kwargs):
+        return SpectralNorm(nn.Conv2d(in_channel, out_channel, **kwargs))
+      def bn(in_channel, **kwargs):
+        return ConditionalBatchNorm2d(in_channel, z_dim, scope='BatchNorm', bn_scope='BatchNorm', gamma_scope='scale', beta_scope='offset', **kwargs)
       self.activation = activation
-      self.bn1 = self.which_bn(self.in_channels, z_dim, index=0)
-      self.conv1 = self.which_conv(self.in_channels, self.hidden_channels, kernel_size=1, padding=0, scope='conv0')
-      self.bn2 = self.which_bn(self.hidden_channels, z_dim, index=1)
-      self.conv2 = self.which_conv(self.hidden_channels, self.hidden_channels, kernel_size=3, padding=1, scope='conv1')
-      self.bn3 = self.which_bn(self.hidden_channels, z_dim, index=2)
-      self.conv3 = self.which_conv(self.hidden_channels, self.hidden_channels, kernel_size=3, padding=1, scope='conv2')
-      self.bn4 = self.which_bn(self.hidden_channels, z_dim, index=3)
-      self.conv4 = self.which_conv(self.hidden_channels, self.out_channels, kernel_size=1, padding=0, scope='conv3')
+      self.bn1 = bn(self.in_channels, index=0)
+      self.conv1 = conv(self.in_channels, self.hidden_channels, kernel_size=1, padding=0, scope='conv0')
+      self.bn2 = bn(self.hidden_channels, index=1)
+      self.conv2 = conv(self.hidden_channels, self.hidden_channels, kernel_size=3, padding=1, scope='conv1')
+      self.bn3 = bn(self.hidden_channels, index=2)
+      self.conv3 = conv(self.hidden_channels, self.hidden_channels, kernel_size=3, padding=1, scope='conv2')
+      self.bn4 = bn(self.hidden_channels, index=3)
+      self.conv4 = conv(self.hidden_channels, self.out_channels, kernel_size=1, padding=0, scope='conv3')
       # upsample layers
       if upsample is True:
         self.upsample = F.upsample
@@ -539,19 +539,20 @@ class DeepGBlock(nn.Module):
       h = self.conv1(self.activation(self.bn1(x, y)))
       # Apply next BN-ReLU
       h = self.activation(self.bn2(h, y))
-      # Drop channels in x if necessary
-      if self.in_channels != self.out_channels:
-        x = x[:, :, :, :self.out_channels]      
-      # Upsample both h and x at this point  
       if self.upsample:
         h = self.upsample(h)
-        x = self.upsample(x)
       # 3x3 convs
       h = self.conv2(h)
       h = self.conv3(self.activation(self.bn3(h, y)))
       # Final 1x1 conv
       h = self.conv4(self.activation(self.bn4(h, y)))
-      return h + x
+      # Drop channels in x if necessary
+      if self.in_channels != self.out_channels:
+        x = x[:, :, :, :self.out_channels]
+      if self.upsample:
+        x = self.upsample(x)
+      h = h + x
+      return h
 
 
 class DeepGenerator512(nn.Module):
@@ -610,7 +611,7 @@ class DeepGenerator512(nn.Module):
 
       # If hierarchical, concatenate zs and ys
       if self.hier:
-        z = nn.cat([y, z], 1)
+        z = nn.cat([z, y], 1)
         y = z
 
       with self.scope('GenZ'):
@@ -640,7 +641,7 @@ class BigGANDeep512(nn.Module):
       if ema:
         def ema_getter(getter, name, *args, **kwargs):
           v = name.split('/')[-1]
-          if v in ['w', 'b', 'scale', 'offset']:
+          if v in ['w', 'b', 'scale', 'offset', 'gamma']:
             name = name + '/ema_0.9999'
           var = getter(name, *args, **kwargs)
           return var
