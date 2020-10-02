@@ -1151,11 +1151,8 @@ class Softmax(Module):
     return softmax(input, dim=self.dim)
 
 
-#def bmm(input, mat2, transpose_b=True, name=None):
 def bmm(input, mat2, transpose_a=False, transpose_b=False, name=None):
   return tf.matmul(input, mat2, transpose_a=transpose_a, transpose_b=transpose_b, name=name)
-
-# bmm = partial(tf.matmul, transpose_b=True)
 
 
 def zeros_(tensor):

@@ -73,7 +73,6 @@ class SelfAttention(nn.Module):
 
   def forward(self, x):
     with self.scope():
-      #x = nn.permute(x, 0, 3, 1, 2) # NHWC to NCHW
       m_batchsize, width, height, C = nn.size(x)
       N = height * width
 
@@ -82,110 +81,15 @@ class SelfAttention(nn.Module):
       theta = self.theta(x)
       phi = self.phi(x)
       phi = self.pool(phi)
-      #phi = nn.view(phi, m_batchsize, -1, N // 4)
       phi = nn.view(phi, m_batchsize, N // 4, -1)
-      #theta = nn.view(theta, m_batchsize, -1, N)
       theta = nn.view(theta, m_batchsize, N, -1)
-      #theta = nn.permute(theta, 0, 2, 1)
       attention = self.softmax(nn.bmm(theta, phi, transpose_b=True))
-      #attention = nn.permute(attention, 0, 2, 1)
       g0 = nn.bmm(attention, g)
       attn_g = nn.view(g0, m_batchsize, width, height, -1)
       out = self.o_conv(attn_g)
       
       out = self.gamma * out + x
-      #out = nn.permute(out, 0, 2, 3, 1) # NCHW to NHWC
       return out
-
-  # def forward(self, x):
-  #   with self.scope():
-  #     #x = nn.permute(x, 0, 3, 1, 2) # NHWC to NCHW
-  #     m_batchsize, width, height, C = nn.size(x)
-  #     N = height * width
-  #     num_channels_attn = C // 8
-  #     num_channels_g = C // 2
-      
-
-  #     #g = nn.view(self.pool(self.g(x)), m_batchsize, N // 4, -1)
-  #     g = nn.view(self.pool(self.g(x)), -1, N // 4, num_channels_g)
-
-  #     theta = self.theta(x)
-  #     phi = self.phi(x)
-  #     phi = self.pool(phi)
-  #     #phi = nn.view(phi, m_batchsize, -1, N // 4)
-  #     #phi = nn.view(phi, m_batchsize, N // 4, -1)
-  #     phi = nn.view(phi, -1, N // 4, num_channels_attn)
-  #     #theta = nn.view(theta, m_batchsize, -1, N)
-  #     #theta = nn.view(theta, m_batchsize, N, -1)
-  #     theta = nn.view(theta, -1, N, num_channels_attn)
-  #     #theta = nn.permute(theta, 0, 2, 1)
-  #     attention = self.softmax(nn.bmm(theta, phi, transpose_b=True))
-  #     #attention = nn.permute(attention, 0, 2, 1)
-  #     g0 = nn.bmm(attention, g)
-  #     #attn_g = nn.view(g0, m_batchsize, width, height, -1)
-  #     attn_g = nn.view(g0, -1, width, height, num_channels_g)
-  #     out = self.o_conv(attn_g)
-      
-  #     out = self.gamma * out + x
-  #     #out = nn.permute(out, 0, 2, 3, 1) # NCHW to NHWC
-  #     return out
-
-  # def forward(self, x):
-  #   with self.scope():
-  #     #x = nn.permute(x, 0, 3, 1, 2) # NHWC to NCHW
-  #     m_batchsize, width, height, C = nn.size(x)
-  #     N = height * width
-
-  #     g = nn.view(self.pool(self.g(x)), m_batchsize, N // 4, -1)
-
-  #     theta = self.theta(x)
-  #     phi = self.phi(x)
-  #     phi = self.pool(phi)
-  #     #phi = nn.view(phi, m_batchsize, -1, N // 4)
-  #     phi = nn.view(phi, m_batchsize, N // 4, -1)
-  #     #theta = nn.view(theta, m_batchsize, -1, N)
-  #     theta = nn.view(theta, m_batchsize, N, -1)
-  #     #theta = nn.permute(theta, 0, 2, 1)
-  #     attention = self.softmax(nn.bmm(phi, theta, transpose_b=True))
-  #     #attention = nn.permute(attention, 0, 2, 1)
-  #     #g0 = nn.bmm(attention, g, transpose_a=True)
-  #     g0 = nn.bmm(g, attention, transpose_a=True)
-  #     #g0 = nn.permute(g0, 0, 2, 1)
-  #     attn_g = nn.view(g0, m_batchsize, width, height, -1)
-  #     out = self.o_conv(attn_g)
-      
-  #     out = self.gamma * out + x
-  #     #out = nn.permute(out, 0, 2, 3, 1) # NCHW to NHWC
-  #     return out
-
-#   def forward(self, x):
-#     with self.scope():
-#       #x = nn.permute(x, 0, 3, 1, 2) # NHWC to NCHW
-#       m_batchsize, width, height, C = nn.size(x)
-#       N = height * width
-
-#       theta = self.theta(x)
-#       phi = self.phi(x)
-#       phi = self.pool(phi)
-#       #phi = nn.view(phi, m_batchsize, -1, N // 4)
-#       phi = nn.view(phi, m_batchsize, N // 4, -1)
-#       #phi = nn.permute(phi, 0, 2, 1)
-#       #theta = nn.view(theta, m_batchsize, -1, N)
-#       theta = nn.view(theta, m_batchsize, N, -1)
-#       theta = nn.permute(theta, 0, 2, 1)
-#       attention = self.softmax(nn.bmm(phi, theta))
-#       attention = nn.permute(attention, 0, 2, 1)
-#       g = nn.view(self.pool(self.g(x)), m_batchsize, N // 4, -1)
-#       #g = nn.permute(g, 0, 2, 1)
-#       #g0 = nn.bmm(attention, g, transpose_b=False)
-#       g0 = nn.bmm(attention, g)
-#       g0 = nn.permute(g0, 0, 2, 1)
-#       attn_g = nn.view(g0, m_batchsize, width, height, -1)
-#       out = self.o_conv(attn_g)
-      
-#       out = self.gamma * out + x
-#       #out = nn.permute(out, 0, 2, 3, 1) # NCHW to NHWC
-#       return out
 
 
 def val(x):
@@ -197,18 +101,18 @@ def val(x):
 
 def batchnorm(input, mean, variance, gamma, beta, epsilon=9.999999747378752e-05):
   return tf.nn.batch_normalization(input, mean, variance, scale=gamma, offset=beta, variance_epsilon=epsilon)
-  return F.batch_norm(input, mean=mean, variance=variance, weight=gamma, bias=beta, training=False, exponential_average_factor=0.1, variance_epsilon=epsilon)
-  mean_v = val(mean)
-  var_v = val(variance)
-  inv_var = tf.math.rsqrt(var_v + epsilon)
-  gamma = val(gamma) if gamma is not None else 1.0
-  x0 = inv_var * gamma
-  x1 = input * x0
-  x2 = mean_v * x1
-  beta = val(beta) if beta is not None else 0.0
-  x3 = beta - x2
-  x4 = x1 + x3
-  return x4
+  # return F.batch_norm(input, mean=mean, variance=variance, weight=gamma, bias=beta, training=False, exponential_average_factor=0.1, variance_epsilon=epsilon)
+  # mean_v = val(mean)
+  # var_v = val(variance)
+  # inv_var = tf.math.rsqrt(var_v + epsilon)
+  # gamma = val(gamma) if gamma is not None else 1.0
+  # x0 = inv_var * gamma
+  # x1 = input * x0
+  # x2 = mean_v * x1
+  # beta = val(beta) if beta is not None else 0.0
+  # x3 = beta - x2
+  # x4 = x1 + x3
+  # return x4
 
 
 class ConditionalBatchNorm2d(nn.Module):
@@ -224,27 +128,8 @@ class ConditionalBatchNorm2d(nn.Module):
     with self.scope():
       gamma = self.gamma_embed(y) + 1
       beta = self.beta_embed(y)
-      print('gamma', gamma)
-      print('input', x)
       out = batchnorm(x, mean=self.bn.accumulated_mean, variance=self.bn.accumulated_var, gamma=gamma, beta=beta)
-      # out = batchnorm(x, mean=self.bn.accumulated_mean, variance=self.bn.accumulated_var, gamma=None, beta=None)
-      # out = nn.view(gamma, -1, 1, 1, self.num_features) * out + nn.view(beta, -1, 1, 1, self.num_features)
       return out
-    
-  # def forward(self, x, y):
-  #   with self.scope():
-  #     #import pdb; pdb.set_trace()
-  #     out = self.bn(x)
-  #     #gamma = self.gamma_embed(y) + 1
-  #     gamma = self.gamma_embed(y)
-  #     beta = self.beta_embed(y)
-  #     #out = gamma.view(-1, self.num_features, 1, 1) * out + beta.view(-1, self.num_features, 1, 1)
-  #     #import pdb; pdb.set_trace()
-  #     out = nn.view(gamma, -1, 1, 1, self.num_features) * out + nn.view(beta, -1, 1, 1, self.num_features)
-  #     # out = nn.view(gamma, -1, 1, 1, self.num_features) * out
-  #     # out = nn.view(beta, -1, 1, 1, self.num_features) + out
-  #     return out
-
 
 
 class ScaledCrossReplicaBN(nn.Module):
@@ -252,32 +137,14 @@ class ScaledCrossReplicaBN(nn.Module):
     super(ScaledCrossReplicaBN, self).__init__(scope=scope, **kwargs)
     with self.scope():
       self.num_features = num_features
-      # self.gamma_embed = nn.Linear(num_classes, num_features, bias=False, scope='gamma')
-      # self.beta_embed = nn.Linear(num_classes, num_features, bias=False, scope='beta')
       self.beta = self.globalvar('beta', shape=[1, 1, 1, self.num_features])
       self.gamma = self.globalvar('gamma', shape=[1, 1, 1, self.num_features])
     self.bn = nn.BatchNorm2d(num_features, affine=False, eps=eps, momentum=momentum, scope=scope+'bn', **kwargs)
 
   def forward(self, input):
     with self.scope():
-      gamma = self.gamma # + 1
-      beta = self.beta
-      # gamma = nn.view(gamma, 1, -1)
-      # beta = nn.view(beta, 1, -1)
-      print('gamma', gamma)
-      print('input', input)
-      out = batchnorm(input, mean=self.bn.accumulated_mean, variance=self.bn.accumulated_var, gamma=gamma, beta=beta)
+      out = batchnorm(input, mean=self.bn.accumulated_mean, variance=self.bn.accumulated_var, gamma=self.gamma, beta=self.beta)
       return out
-
-    
-  # def forward(self, input):
-  #   # with self.scope():
-  #   #   #out = self.bn(input)
-  #   #   out = self.gamma * out + self.beta
-  #   #   #out = tf.nn.bias_add(out * self.gamma, self.beta)
-  #   #   return out
-  #   return self.bn1(input)
-
 
 
 class GBlock(nn.Module):
@@ -369,30 +236,16 @@ class Generator256(nn.Module):
       with self.scope('G_Z'):
         self.G_linear = SpectralNorm(nn.Linear(20, 4 * 4 * 16 * chn, scope="G_linear"))
 
-      #self.GBlock = nn.ModuleList([
-      # self.GBlock = ([
-      #   GBlock(16 * chn, 16 * chn, n_class=n_class, index=0),
-      #   GBlock(16 * chn, 8 * chn, n_class=n_class, index=1),
-      #   GBlock(8 * chn, 8 * chn, n_class=n_class, index=2),
-      #   GBlock(8 * chn, 4 * chn, n_class=n_class, index=3),
-      #   GBlock(4 * chn, 2 * chn, n_class=n_class, index=4),
-      #   GBlock(2 * chn, 1 * chn, n_class=n_class, index=5),
-      # ])
-      #self.sa_id = 5
-
-      self.GBlock = ([
-        GBlock(16 * chn, 16 * chn, n_class=n_class, index=0),
-        GBlock(16 * chn, 8 * chn, n_class=n_class, index=1),
-        GBlock(8 * chn, 8 * chn, n_class=n_class, index=2),
-        GBlock(8 * chn, 4 * chn, n_class=n_class, index=3),
-        GBlock(4 * chn, 2 * chn, n_class=n_class, index=4),
-      ])
+      self.GBlock = []
+      self.GBlock += [GBlock(16 * chn, 16 * chn, n_class=n_class, index=0)]
+      self.GBlock += [GBlock(16 * chn, 8 * chn, n_class=n_class, index=1)]
+      self.GBlock += [GBlock(8 * chn, 8 * chn, n_class=n_class, index=2)]
+      self.GBlock += [GBlock(8 * chn, 4 * chn, n_class=n_class, index=3)]
+      self.GBlock += [GBlock(4 * chn, 2 * chn, n_class=n_class, index=4)]
       self.sa_id = len(self.GBlock)
       assert self.sa_id == 5
       self.attention = SelfAttention(2 * chn)
-      self.GBlock += ([
-        GBlock(2 * chn, 1 * chn, n_class=n_class, index=5),
-      ])
+      self.GBlock += [GBlock(2 * chn, 1 * chn, n_class=n_class, index=5)]
 
       self.num_split = len(self.GBlock) + 1
 
@@ -400,7 +253,6 @@ class Generator256(nn.Module):
       self.colorize = SpectralNorm(nn.Conv2d(1 * chn, 3, [3, 3], padding=1, scope='conv_2d'))
       
       
-
   def forward(self, input, class_id):
     with self.scope():
       codes = tf.split(input, self.num_split, 1)
@@ -413,9 +265,7 @@ class Generator256(nn.Module):
         if i == self.sa_id:
           out = self.attention(out)
         condition = nn.cat([code, class_emb], 1)
-        print(condition)
         out = GBlock(out, condition)
-        print(out)
 
       out = self.ScaledCrossReplicaBN(out)
       out = F.relu(out)
@@ -481,7 +331,7 @@ class Discriminator256(nn.Module):
       prod = nn.sum(out * embed, 1)
 
       return out_linear + prod
-    
+
 
 
 class Generator512(nn.Module):
@@ -545,9 +395,7 @@ class Generator512(nn.Module):
         if i == self.sa_id:
           out = self.attention(out)
         condition = nn.cat([code, class_emb], 1)
-        print(condition)
         out = GBlock(out, condition)
-        print(out)
 
       out = self.ScaledCrossReplicaBN(out)
       out = F.relu(out)
@@ -598,6 +446,7 @@ class Discriminator512(nn.Module):
       #self.embed.weight.data.uniform_(-0.1, 0.1) # TODO
       self.embed = SpectralNorm(self.embed)
 
+
   def forward(self, input, class_id):
     with self.scope():
 
@@ -624,10 +473,8 @@ class BigGAN256(nn.Module):
       self.discriminator = Discriminator256() if disc else None
       self.generator = Generator256()
       def ema_getter(getter, name, *args, **kwargs):
-        #print('ema_getter', name, *args, kwargs)
         v = name.split('/')[-1]
         if v in ['w', 'b', 'beta', 'gamma']:
-          #print('EMA', name + '/ema_b999900')
           name = name + '/ema_b999900'
         var = getter(name, *args, **kwargs)
         return var
@@ -643,10 +490,8 @@ class BigGAN512(nn.Module):
       self.discriminator = Discriminator512() if disc else None
       self.generator = Generator512()
       def ema_getter(getter, name, *args, **kwargs):
-        #print('ema_getter', name, *args, kwargs)
         v = name.split('/')[-1]
         if v in ['w', 'b', 'beta', 'gamma']:
-          #print('EMA', name + '/ema_b999900')
           name = name + '/ema_b999900'
         var = getter(name, *args, **kwargs)
         return var
@@ -657,6 +502,7 @@ class BigGAN512(nn.Module):
 
 assert_shape = nn.assert_shape
 shapelist = nn.shapelist
+
 
 class SpectralNorm(nn.Module):
   def __init__(self, module, name='weight', epsilon=9.999999747378752e-05, update=None, scope=None, **kwargs):
@@ -682,7 +528,6 @@ class SpectralNorm(nn.Module):
     shape = shapelist(w)
     ushape = [1, shape[-1]]
     with self.module.scope():
-      print('TKTK', tf.get_variable_scope().name)
       self.u0 = self.module.localvar('u0', dtype=w.dtype, shape=ushape, initializer=tf.truncated_normal_initializer(mean=0.0, stddev=1.0), collections=['variables'])
       self.u1 = self.module.localvar('u1', dtype=w.dtype, shape=ushape, initializer=tf.truncated_normal_initializer(mean=0.0, stddev=1.0), collections=['variables'])
       self.u2 = self.module.localvar('u2', dtype=w.dtype, shape=ushape, initializer=tf.truncated_normal_initializer(mean=0.0, stddev=1.0), collections=['variables'])
