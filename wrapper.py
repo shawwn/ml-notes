@@ -4,6 +4,7 @@ from __future__ import division
 from __future__ import print_function
 
 from pprint import pprint as pp
+from pprint import pformat as pf
 from contextlib import contextmanager
 
 import sys
@@ -24,6 +25,9 @@ from tensorflow.python.framework import test_util
 from tensorflow.python.platform import test
 from tensorflow.python.training import server_lib
 from tensorflow.python.util import compat
+
+from tensorflow.core.protobuf.tpu import topology_pb2
+from tensorflow.python.tpu import topology as topology_lib
 
 
 try:
@@ -147,13 +151,69 @@ def _fetch_cloud_tpu_metadata(cls, *args, **kws):
       else:
         raise e
 
+
+__parse_topology = topology_lib.Topology._parse_topology
+
+def _parse_topology(self, serialized):
+    """Parses a serialized `TopologyProto` into `self`."""
+    proto = topology_pb2.TopologyProto()
+    proto.ParseFromString(serialized)
+
+    self._mesh_shape = np.array(proto.mesh_shape, dtype=np.int32)
+    if len(self._mesh_shape) != 4 or any(self._mesh_shape < 1):
+      raise ValueError("`mesh_shape` must be a vector of size 4 with positive "
+                       "entries; got {}".format(self._mesh_shape))
+
+    if proto.num_tasks < 0:
+      raise ValueError("`num_tasks` must be >= 0; got {}".format(
+          proto.num_tasks))
+    if proto.num_tpu_devices_per_task < 0:
+      raise ValueError("`num_tpu_devices_per_task` must be >= 0; got {}".format(
+          proto.num_tpu_devices_per_task))
+
+    expected_coordinates_size = (
+        proto.num_tasks * proto.num_tpu_devices_per_task * len(
+            proto.mesh_shape))
+    if len(proto.device_coordinates) != expected_coordinates_size:
+      raise ValueError("`device_coordinates` must have shape num_tasks ({}) * "
+                       "num_tpu_devices_per_task ({}) * len(mesh_shape) ({}); "
+                       "got shape {}".format(proto.num_tasks,
+                                             proto.num_tpu_devices_per_task,
+                                             proto.mesh_shape,
+                                             len(proto.device_coordinates)))
+
+    coords = np.array(proto.device_coordinates, dtype=np.int32)
+    if any(coords < 0):
+      raise ValueError("`device_coordinates` must be >= 0")
+    coords = coords.reshape((proto.num_tasks, proto.num_tpu_devices_per_task,
+                             len(proto.mesh_shape)))
+    self._device_coordinates = coords
+  
+
+__invert_topology = topology_lib.Topology._invert_topology
+
+def _invert_topology(self):
+  """Inverts a [task,device,axis] topology to [x,y,z] -> task/device maps."""
+  tasks = np.full(list(self.mesh_shape), -1, dtype=np.int32)
+  devices = np.full(list(self.mesh_shape), -1, dtype=np.int32)
+  for task in range(self.device_coordinates.shape[0]):
+    for device in range(self.device_coordinates.shape[1]):
+      x, y, z, core = self.device_coordinates[task, device, :]
+      tasks[x, y, z, core] = task
+      devices[x, y, z, core] = device
+  return tasks, devices
+
+
 @contextmanager
 def patch_tensorflow():
   with mock.patch.object(resolver.TPUClusterResolver, 'master', mock_master):
     with mock.patch.object(resolver.TPUClusterResolver, 'cluster_spec', cluster_spec):
       with mock.patch.object(client.Client if client is not None else resolver.TPUClusterResolver, '_fetch_cloud_tpu_metadata', _fetch_cloud_tpu_metadata):
-        result = yield
-        return result
+        with mock.patch.object(topology_lib.Topology, '_parse_topology', _parse_topology):
+          with mock.patch.object(topology_lib.Topology, '_invert_topology', _invert_topology):
+            result = yield
+            return result
+
 
 def patch_tensorflow_interactive():
   patch = patch_tensorflow()
