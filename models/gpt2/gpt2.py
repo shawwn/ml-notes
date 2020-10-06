@@ -1,4 +1,5 @@
 import math
+import os
 
 import numpy as np
 import tensorflow as tf
@@ -237,11 +238,39 @@ def model(X, params, labels=None, past=None, scope='model', reuse=False, train=F
         checkpoint=False if 'memory_saving_gradients' not in params else params['memory_saving_gradients']
         every = 1 if 'memory_saving_checkpoints' not in params else params['memory_saving_checkpoints']
         for layer, past in enumerate(pasts):
-            h, present = block(h, 'h%d' % layer, past=past, params=params, attn=attn, train=train, batch_size=batch, seq_length=sequence)
+            def block0(x):
+              with tf1.variable_scope(scope, reuse=reuse):
+                x1, present = block(x, 'h%d' % layer, past=past, params=params, attn=attn, train=train, batch_size=batch, seq_length=sequence)
+                presents.append(present)
+                return x1
+            @tf.custom_gradient
+            def block1(input):
+              def grad(dy, variables=None):
+                # dy is d(output)/d(loss).
+                # variables contains the tensors used to calculate
+                # d(param)/d(loss).
+                # first, we use stop_gradient to ensure that the
+                # forward pass is completely disconnected.
+                input0 = tf.stop_gradient(input)
+                # then, we use the disconnected input to recalculate
+                # the output for this layer.
+                output0 = block0(input0)
+                # now that we have the output, we need to calculate
+                # d(input)/d(output) * d(output)/d(loss), i.e. chain rule:
+                result = tf.gradients(output0, input0, dy)
+                if variables != None:
+                  # ditto for d(param)/d(output) * d(output)/d(loss)
+                  return result, tf.gradients(output0, variables, dy)
+                return result
+              output = block0(input)
+              return output, grad
             if checkpoint and (isinstance(every, int) and layer % every == 0 or layer in every):
                 tf.logging.info('checkpointing layer %d', layer)
                 tf.add_to_collection('checkpoints', h)
-            presents.append(present)
+            if bool(int(os.environ.get('GRADIENT_CHECKPOINTING', '0'))):
+              h = block1(h)
+            else:
+              h = block0(h)
             activations.append(h)
         results['present'] = tf.stack(presents, axis=1)
         results['activations'] = activations
