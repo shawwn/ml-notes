@@ -3,6 +3,7 @@ import os
 
 import numpy as np
 import tensorflow as tf
+from pprint import pformat as pps
 
 tf1 = tf.compat.v1
 
@@ -259,6 +260,15 @@ def model(X, params, labels=None, past=None, scope='model', reuse=False, train=F
                 # d(input)/d(output) * d(output)/d(loss), i.e. chain rule:
                 result = tf.gradients(output0, input0, dy)
                 if variables != None:
+                  paramcount = lambda vs: sum([np.prod(v.shape.as_list()) for v in vs])
+                  def logvars(variables, label, print_variables=True):
+                    if print_variables:
+                      tf.logging.info("%s (%s parameters): %s", label, paramcount(variables), pps(variables))
+                    else:
+                      tf.logging.info("%s (%s parameters)", label, paramcount(variables))
+                    return variables
+                  tf.logging.info("---------")
+                  logvars(variables, "block1_grad variables for layer %s" % layer)
                   # ditto for d(param)/d(output) * d(output)/d(loss)
                   return result, tf.gradients(output0, variables, dy)
                 return result
