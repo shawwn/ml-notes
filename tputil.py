@@ -336,6 +336,13 @@ def sample(chunk, chunk_size, tokens_per_example, batch_size=1):
   return tokens
 
 
+import math
+
+
+def is_pow2(n):
+  return math.log(n, 2).is_integer()
+
+
 def sample_tokens(chunk, chunk_size, tokens_per_example, batch_size=1):
   pos = randpos(tokens_per_example + 1, chunk_size, batch_size=batch_size)
   part = tf.tile(tf.expand_dims(tf.range(tokens_per_example, dtype=tf.int64), axis=0), [batch_size, 1])
@@ -344,7 +351,21 @@ def sample_tokens(chunk, chunk_size, tokens_per_example, batch_size=1):
   label = tf.gather(chunk, indices + 1)
   feature = tf.cast(feature, dtype=tf.int32)
   label = tf.cast(label, dtype=tf.int32)
+  factor = int(os.environ.get('SPATIAL_PARTITIONING', '1'))
+  if factor > 1:
+    assert is_pow2(tokens_per_example)
+    N = batch_size
+    H = math.sqrt(tokens_per_example)
+    W = math.sqrt(tokens_per_example)
+    C = 1
+    tf.logging.info("Using SPATIAL_PARTITIONING=%d; reshaping tokens from [%d, %d] to [N=%d, H=%d, W=%d, C=1]",
+        factor,
+        batch_size, tokens_per_example, 
+        N, H, W, C)
+    feature = tf.reshape(feature, [N, H, W, C])
+    label = tf.reshape(label, [N, H, W, C])
   return feature, label
+     
 
 
 def sample_text(chunk, amount, batch_size=1):
