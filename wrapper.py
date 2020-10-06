@@ -353,7 +353,7 @@ if __name__ == '__main__':
       pass
     def cached_topology(name=None):
       if name is None:
-        name = os.environ['TPU_NAME']
+        name = os.environ.get('TPU_NAME', None)
       result = topology_cache.get(name, None)
       if result is not None:
         serialized = base64.b64decode(result)
