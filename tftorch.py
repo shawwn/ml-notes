@@ -1635,3 +1635,17 @@ def embedding(input, params, max_norm=None, name=None):
     return tf.matmul(input, params)
 
 
+def softplus(input, beta=1, threshold=20) -> Tensor:
+  r"""Applies element-wise, the function :math:`\text{Softplus}(x) = \frac{1}{\beta} * \log(1 + \exp(\beta * x))`.
+
+For numerical stability the implementation reverts to the linear function
+when :math:`input \times \beta > threshold`.
+
+See :class:`~torch.nn.Softplus` for more details."""
+  if beta == 1:
+    # fast path
+    return tf.where(input > threshold, input, tf.math.softplus(input))
+  else:
+    x = input * beta
+    return tf.where(x > threshold, x, tf.math.softplus(x) / beta)
+
