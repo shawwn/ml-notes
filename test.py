@@ -357,7 +357,7 @@ class Generator512(nn.Module):
       self.GBlock += [GBlock(8 * chn, 4 * chn, n_class=n_class, z_dim=z_dim, index=3)]
       self.sa_id = len(self.GBlock)
       assert self.sa_id == 4
-      self.attention = SelfAttention(2 * chn)
+      self.attention = SelfAttention(4 * chn)
       self.GBlock += [GBlock(4 * chn, 2 * chn, n_class=n_class, z_dim=z_dim, index=4)]
       self.GBlock += [GBlock(2 * chn, 1 * chn, n_class=n_class, z_dim=z_dim, index=5)]
       self.GBlock += [GBlock(1 * chn, 1 * chn, n_class=n_class, z_dim=z_dim, index=6)]
