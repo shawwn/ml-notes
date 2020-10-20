@@ -135,6 +135,7 @@ def main(unused_argv):
       print(images[0].shape)
       print('embedding', zz['parsed']['image/class/embedding'].values.shape)
       print('filename', zz['parsed']['image/filename'])
+      print('hash', zz['parsed']['image/hash'])
       op = tf.io.encode_jpeg(images[0])
       with open('test.png', 'wb') as f:
         f.write(sess.run(op))

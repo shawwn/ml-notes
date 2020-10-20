@@ -119,6 +119,7 @@ class ImageNet(object):
     }
 
     parsed = tf.parse_single_example(value, keys_to_features)
+    parsed['image/hash'] = tf.raw_ops.Fingerprint(data=[parsed['image/encoded']], method='farmhash64')[0]
     image_bytes = tf.reshape(parsed['image/encoded'], shape=[])
     image = tf.io.decode_image(image_bytes, 3)
 
