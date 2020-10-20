@@ -373,6 +373,7 @@ class Discriminator256(nn.Module):
 
       self.embed = nn.Embedding(n_class, 16 * chn, scope='embed')
       #self.embed.weight.data.uniform_(-0.1, 0.1) # TODO
+      nn.uniform_(self.embed.weight, -0.1, 0.1)
       self.embed = SpectralNorm(self.embed)
 
   def forward(self, input, class_id):
