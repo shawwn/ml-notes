@@ -1,4 +1,3 @@
-import tpu_normalization as tpun
 import tftorch as nn
 F = nn
 init = nn
@@ -16,6 +15,7 @@ class TestModule(nn.Module):
       #self.v = tft.localvar('v', shape=[8])
       self.v = tft.globalvar('v', shape=[8])
       #self.v = self.v.assign(nn.kaiming_uniform_(self.v, a=math.sqrt(5)))
+      import tpu_normalization as tpun
       with self.scope('bn1'):
         self.bn1 = tpun.CrossReplicaBatchNormalization()
       with self.scope('bn2'):
