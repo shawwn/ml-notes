@@ -1649,3 +1649,54 @@ See :class:`~torch.nn.Softplus` for more details."""
     x = input * beta
     return tf.where(x > threshold, x, tf.math.softplus(x) / beta)
 
+
+def mean(input, dim=None, keepdim=False, *, out=None) -> Tensor:
+  r"""Returns the mean value of all elements in the :attr:`input` tensor.
+
+Args:
+    {input}
+
+Example::
+
+    >>> a = torch.randn(1, 3)
+    >>> a
+    tensor([[ 0.2294, -0.5481,  1.3288]])
+    >>> torch.mean(a)
+    tensor(0.3367)
+
+.. function:: mean(input, dim, keepdim=False, *, out=None) -> Tensor
+
+Returns the mean value of each row of the :attr:`input` tensor in the given
+dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
+reduce over all of them.
+
+{keepdim_details}
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.randn(4, 4)
+    >>> a
+    tensor([[-0.3841,  0.6320,  0.4254, -0.7384],
+            [-0.9644,  1.0131, -0.6549, -1.4279],
+            [-0.2951, -1.3350, -0.7694,  0.5600],
+            [ 1.0842, -0.9580,  0.3623,  0.2343]])
+    >>> torch.mean(a, 1)
+    tensor([-0.0163, -0.5085, -0.4599,  0.1807])
+    >>> torch.mean(a, 1, True)
+    tensor([[-0.0163],
+            [-0.5085],
+            [-0.4599],
+            [ 0.1807]])
+  """
+  if out is not None:
+    raise NotImplementedError()
+  return tf.reduce_mean(input, axis=dim, keepdims=keepdim)
+
