@@ -166,7 +166,7 @@ class ImageNet(object):
 
   @staticmethod
   def make_dataset(data_dirs, index, num_hosts,
-                   seed=None, shuffle_filenames=True,
+                   seed=None, shuffle_filenames=False,
                    num_parallel_calls = 64):
 
     if shuffle_filenames:
