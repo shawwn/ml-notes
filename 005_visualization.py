@@ -761,23 +761,23 @@ op_final = len(graph.get_operations())
 
 
 
-#import tftorch as nn; reload(nn); import BigGAN; reload(BigGAN); mdl = BigGAN.BigGAN256(scope=''); op_offset = len(graph.get_operations()); samples = mdl.generator(z, y); op_final = len(graph.get_operations()); samples
+#import tftorch as nn; reload(nn); import BigGAN; reload(BigGAN); mdl = BigGAN.BigGAN256(scope='').eval(); op_offset = len(graph.get_operations()); samples = mdl.generator(z, y); op_final = len(graph.get_operations()); samples
 
 # BigGAN-256
 assert deep == False
 assert res == 256
 from importlib import reload
-import tftorch as nn; reload(nn); import BigGAN; reload(BigGAN); mdl = BigGAN.BigGAN256(scope='', disc=True); op_offset = len(graph.get_operations()); samples = mdl.ema_generator(z, y); op_final = len(graph.get_operations()); logits = mdl.discriminator(samples, y); samples
+import tftorch as nn; reload(nn); import BigGAN; reload(BigGAN); mdl = BigGAN.BigGAN256(scope='', disc=True).eval(); op_offset = len(graph.get_operations()); samples = mdl.ema_generator(z, y); op_final = len(graph.get_operations()); logits = mdl.discriminator(samples, y); samples
 
 # BigGAN-512
 assert deep == False
 assert res == 512
 from importlib import reload
-import tftorch as nn; reload(nn); import BigGAN; reload(BigGAN); mdl = BigGAN.BigGAN512(scope='', disc=True); op_offset = len(graph.get_operations()); samples = mdl.ema_generator(z, y); op_final = len(graph.get_operations()); logits = mdl.discriminator(samples, y); samples
+import tftorch as nn; reload(nn); import BigGAN; reload(BigGAN); mdl = BigGAN.BigGAN512(scope='', disc=True).eval(); op_offset = len(graph.get_operations()); samples = mdl.ema_generator(z, y); op_final = len(graph.get_operations()); logits = mdl.discriminator(samples, y); samples
 
 # BigGAN-deep-512
 assert deep == True
-import tftorch as nn; reload(nn); import BigGAN; reload(BigGAN); mdl = BigGAN.BigGANDeep512(scope=''); op_offset = len(graph.get_operations()); samples = mdl.ema_generator(z, y); op_final = len(graph.get_operations()); samples
+import tftorch as nn; reload(nn); import BigGAN; reload(BigGAN); mdl = BigGAN.BigGANDeep512(scope='').eval(); op_offset = len(graph.get_operations()); samples = mdl.ema_generator(z, y); op_final = len(graph.get_operations()); samples
 
 #import clipboard; import graph_to_code as gcode; reload(gcode); import biggan_256; code = [gcode.PrettyOp(op) for op in graph.get_operations()]; codes = pf(code); f = open('bg2-ops.txt', 'w'); f.write(codes); f.close(); del f
 
