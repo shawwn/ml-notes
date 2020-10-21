@@ -301,18 +301,18 @@ class Generator256(nn.Module):
       with self.scope('G_Z'):
         self.G_linear = SpectralNorm(nn.Linear(20, 4 * 4 * 16 * chn, scope="G_linear"))
 
-      self.GBlock = []
-      self.GBlock += [GBlock(16 * chn, 16 * chn, n_class=n_class, index=0)]
-      self.GBlock += [GBlock(16 * chn, 8 * chn, n_class=n_class, index=1)]
-      self.GBlock += [GBlock(8 * chn, 8 * chn, n_class=n_class, index=2)]
-      self.GBlock += [GBlock(8 * chn, 4 * chn, n_class=n_class, index=3)]
-      self.GBlock += [GBlock(4 * chn, 2 * chn, n_class=n_class, index=4)]
-      self.sa_id = len(self.GBlock)
-      assert self.sa_id == 5
-      self.attention = SelfAttention(2 * chn)
-      self.GBlock += [GBlock(2 * chn, 1 * chn, n_class=n_class, index=5)]
+      self.blocks = nn.ModuleList()
+      self.blocks += [GBlock(16 * chn, 16 * chn, n_class=n_class, index=0)]
+      self.blocks += [GBlock(16 * chn, 8 * chn, n_class=n_class, index=1)]
+      self.blocks += [GBlock(8 * chn, 8 * chn, n_class=n_class, index=2)]
+      self.blocks += [GBlock(8 * chn, 4 * chn, n_class=n_class, index=3)]
+      self.blocks += [GBlock(4 * chn, 2 * chn, n_class=n_class, index=4)]
+      self.blocks.sa_id = len(self.blocks)
+      assert self.blocks.sa_id == 5
+      self.blocks.attention = SelfAttention(2 * chn)
+      self.blocks += [GBlock(2 * chn, 1 * chn, n_class=n_class, index=5)]
 
-      self.num_split = len(self.GBlock) + 1
+      self.num_split = len(self.blocks)
 
       self.ScaledCrossReplicaBN = ScaledCrossReplicaBN(1 * chn, eps=1e-4)
       self.colorize = SpectralNorm(nn.Conv2d(1 * chn, 3, [3, 3], padding=1, scope='conv_2d'))
@@ -326,11 +326,12 @@ class Generator256(nn.Module):
       with self.scope('G_Z'):
         out = self.G_linear(codes[0])
       out = nn.view(out, -1, 4, 4, self.first_view)
-      for i, (code, GBlock) in enumerate(zip(codes[1:], self.GBlock)):
-        if i == self.sa_id:
-          out = self.attention(out)
+      blocks = [block for block in self.blocks if isinstance(block, GBlock)]
+      for i, (code, block) in enumerate(zip(codes[1:], blocks)):
+        if i == self.blocks.sa_id:
+          out = self.blocks.attention(out)
         condition = nn.cat([code, class_emb], 1)
-        out = GBlock(out, condition)
+        out = block(out, condition)
 
       out = self.ScaledCrossReplicaBN(out)
       out = F.relu(out)
@@ -421,19 +422,19 @@ class Generator512(nn.Module):
 
       z_dim = dim_z + 16
 
-      self.GBlock = []
-      self.GBlock += [GBlock(16 * chn, 16 * chn, n_class=n_class, z_dim=z_dim, index=0)]
-      self.GBlock += [GBlock(16 * chn, 8 * chn, n_class=n_class, z_dim=z_dim, index=1)]
-      self.GBlock += [GBlock(8 * chn, 8 * chn, n_class=n_class, z_dim=z_dim, index=2)]
-      self.GBlock += [GBlock(8 * chn, 4 * chn, n_class=n_class, z_dim=z_dim, index=3)]
-      self.sa_id = len(self.GBlock)
-      assert self.sa_id == 4
-      self.attention = SelfAttention(4 * chn)
-      self.GBlock += [GBlock(4 * chn, 2 * chn, n_class=n_class, z_dim=z_dim, index=4)]
-      self.GBlock += [GBlock(2 * chn, 1 * chn, n_class=n_class, z_dim=z_dim, index=5)]
-      self.GBlock += [GBlock(1 * chn, 1 * chn, n_class=n_class, z_dim=z_dim, index=6)]
+      self.blocks = nn.ModuleList()
+      self.blocks += [GBlock(16 * chn, 16 * chn, n_class=n_class, z_dim=z_dim, index=0)]
+      self.blocks += [GBlock(16 * chn, 8 * chn, n_class=n_class, z_dim=z_dim, index=1)]
+      self.blocks += [GBlock(8 * chn, 8 * chn, n_class=n_class, z_dim=z_dim, index=2)]
+      self.blocks += [GBlock(8 * chn, 4 * chn, n_class=n_class, z_dim=z_dim, index=3)]
+      self.blocks.sa_id = len(self.blocks)
+      assert self.blocks.sa_id == 4
+      self.blocks.attention = SelfAttention(4 * chn)
+      self.blocks += [GBlock(4 * chn, 2 * chn, n_class=n_class, z_dim=z_dim, index=4)]
+      self.blocks += [GBlock(2 * chn, 1 * chn, n_class=n_class, z_dim=z_dim, index=5)]
+      self.blocks += [GBlock(1 * chn, 1 * chn, n_class=n_class, z_dim=z_dim, index=6)]
 
-      self.num_split = len(self.GBlock) + 1
+      self.num_split = len(self.blocks)
 
       self.ScaledCrossReplicaBN = ScaledCrossReplicaBN(1 * chn, eps=1e-4)
       self.colorize = SpectralNorm(nn.Conv2d(1 * chn, 3, [3, 3], padding=1, scope='conv_2d'))
@@ -448,11 +449,12 @@ class Generator512(nn.Module):
       with self.scope('G_Z'):
         out = self.G_linear(codes[0])
       out = nn.view(out, -1, 4, 4, self.first_view)
-      for i, (code, GBlock) in enumerate(zip(codes[1:], self.GBlock)):
-        if i == self.sa_id:
-          out = self.attention(out)
+      blocks = [block for block in self.blocks if isinstance(block, GBlock)]
+      for i, (code, block) in enumerate(zip(codes[1:], blocks)):
+        if i == self.blocks.sa_id:
+          out = self.blocks.attention(out)
         condition = nn.cat([code, class_emb], 1)
-        out = GBlock(out, condition)
+        out = block(out, condition)
 
       out = self.ScaledCrossReplicaBN(out)
       out = F.relu(out)
@@ -759,25 +761,25 @@ shapelist = nn.shapelist
 
 
 class SpectralNorm(nn.Module):
-  def __init__(self, module, name='weight', epsilon=9.999999747378752e-05, update=None, scope=None, **kwargs):
+  def __init__(self, module, name='weight', epsilon=9.999999747378752e-05, scope=None, **kwargs):
     super().__init__(scope=scope, **kwargs)
     self.module = module
     self.name = name
     self.epsilon = epsilon
-    self.update = update
-    self.update = False
     self._make_params()
 
   def should_update(self):
-    if self.update is False:
-      return False
     if self.training:
       return True
     return False
 
 
   def _make_params(self):
-    w = getattr(self.module, self.name)
+    if hasattr(self, 'w'):
+      w = self.w
+    else:
+      w = getattr(self.module, self.name)
+      self.w = w
     assert len(shapelist(w)) > 1
     shape = shapelist(w)
     ushape = [1, shape[-1]]
@@ -788,10 +790,12 @@ class SpectralNorm(nn.Module):
       return w
 
   def _update(self):
-    if not hasattr(self, 'u0'):
-      w = self._make_params()
+    assert hasattr(self, 'w') and hasattr(self, 'u0')
+    # if not hasattr(self, 'u0'):
+    #   w = self._make_params()
     epsilon = self.epsilon
-    w = getattr(self.module, self.name)
+    #w = getattr(self.module, self.name)
+    w = self.w
     w = val(w)
     assert len(shapelist(w)) > 1
     shape = shapelist(w)
@@ -1367,10 +1371,12 @@ class SpectralNorm(nn.Module):
     return self.module.forward(*args)
   
 
-@gin.configurable
-class GAN:
-  def __init__(self, gan=BigGAN256, **kwargs):
-    self.gan = gan(**kwargs, disc=True)
+@gin.configurable(whitelist=['gan'])
+class GAN(nn.Module):
+  def __init__(self, gan=BigGAN256, scope='', **kwargs):
+    super().__init__(scope=scope, **kwargs)
+    with self.scope():
+      self.gan = gan(disc=True)
 
 
 
