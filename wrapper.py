@@ -250,6 +250,11 @@ def reset_session(session=None, graph=None, interactive=True, **kws):
     globals()['sess'] = session2
   return session2
 
+from tensorflow.python.distribute import values
+
+def enclosing_tpu_context():
+  return values._enclosing_tpu_context()
+
 
 from tensorflow.core.protobuf import config_pb2
 from tensorflow.core.protobuf import rewriter_config_pb2
@@ -373,6 +378,13 @@ if __name__ == '__main__':
       return device_assignment_lib._compute_task_and_cores_to_replicas(tpu_topology.device_coordinates, tpu_topology)
     def get_core_assignment(*core_ids):
       return device_assignment_lib.DeviceAssignment(get_topology(), [[get_topology().device_coordinates[0][i]] for i in core_ids])
+    def get_device_assignment(num_replicas, computation_shape=None, topology=None):
+      if topology is None:
+        topology = get_topology()
+      if computation_shape is None:
+        computation_shape = [1, 1, 1, 2]
+      device_assignment = tf.tpu.experimental.DeviceAssignment.build(topology, computation_shape=computation_shape, num_replicas=num_replicas)
+      return device_assignment
     tpu_topology = cached_topology()
   else:
     filename = sys.argv[1]
