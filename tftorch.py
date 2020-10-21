@@ -299,6 +299,46 @@ def _addindent(s_, numSpaces):
 
 
 class Module(object):
+    r"""Base class for all neural network modules.
+
+    Your models should also subclass this class.
+
+    Modules can also contain other Modules, allowing to nest them in
+    a tree structure. You can assign the submodules as regular attributes::
+
+        import torch.nn as nn
+        import torch.nn.functional as F
+
+        class Model(nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.conv1 = nn.Conv2d(1, 20, 5)
+                self.conv2 = nn.Conv2d(20, 20, 5)
+
+            def forward(self, x):
+                x = F.relu(self.conv1(x))
+                return F.relu(self.conv2(x))
+
+    Submodules assigned in this way will be registered, and will have their
+    parameters converted too when you call :meth:`to`, etc.
+
+    :ivar training: Boolean represents whether this module is in training or
+                    evaluation mode.
+    :vartype training: bool
+    """
+
+    r"""This allows better BC support for :meth:`load_state_dict`. In
+    :meth:`state_dict`, the version number will be saved as in the attribute
+    `_metadata` of the returned state dict, and thus pickled. `_metadata` is a
+    dictionary with keys that follow the naming convention of state dict. See
+    ``_load_from_state_dict`` on how to use this information in loading.
+
+    If new parameters/buffers are added/removed from a module, this number shall
+    be bumped, and the module's `_load_from_state_dict` method can compare the
+    version number and do appropriate changes if the state dict is from before
+    the change."""
+    _version: int = 1
+  
     def __init__(self, scope=None, index=None, index_prefix='_', index_bias=0):
         self.training = True
         self._parent_scope = tf.get_variable_scope().name
@@ -766,6 +806,17 @@ class Module(object):
         """
         return self.train(False)
 
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        # Support loading old checkpoints that don't have the following attrs:
+        if '_forward_pre_hooks' not in self.__dict__:
+            self._forward_pre_hooks = OrderedDict()
+        if '_state_dict_hooks' not in self.__dict__:
+            self._state_dict_hooks = OrderedDict()
+        if '_load_state_dict_pre_hooks' not in self.__dict__:
+            self._load_state_dict_pre_hooks = OrderedDict()
+        if '_non_persistent_buffers_set' not in self.__dict__:
+            self._non_persistent_buffers_set = set()
 
     def __getattr__(self, name: str) -> Union[Tensor, 'Module']:
         if '_parameters' in self.__dict__:
@@ -841,6 +892,80 @@ class Module(object):
         else:
             object.__delattr__(self, name)
 
+    def _register_state_dict_hook(self, hook):
+        r"""These hooks will be called with arguments: `self`, `state_dict`,
+        `prefix`, `local_metadata`, after the `state_dict` of `self` is set.
+        Note that only parameters and buffers of `self` or its children are
+        guaranteed to exist in `state_dict`. The hooks may modify `state_dict`
+        inplace or return a new one.
+        """
+        handle = hooks.RemovableHandle(self._state_dict_hooks)
+        self._state_dict_hooks[handle.id] = hook
+        return handle
+
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        r"""Saves module state to `destination` dictionary, containing a state
+        of the module, but not its descendants. This is called on every
+        submodule in :meth:`~torch.nn.Module.state_dict`.
+
+        In rare cases, subclasses can achieve class-specific behavior by
+        overriding this method with custom logic.
+
+        Arguments:
+            destination (dict): a dict where state will be stored
+            prefix (str): the prefix for parameters and buffers used in this
+                module
+        """
+        for name, param in self._parameters.items():
+            if param is not None:
+                destination[prefix + name] = param if keep_vars else detach(param, name=param.name.rsplit(':', 1)[0])
+        for name, buf in self._buffers.items():
+            if buf is not None and name not in self._non_persistent_buffers_set:
+                destination[prefix + name] = buf if keep_vars else detach(buf, name=buf.name.rsplit(':', 1)[0])
+
+    # The user can pass an optional arbitrary mappable object to `state_dict`, in which case `state_dict` returns
+    # back that same object. But if they pass nothing, an `OrederedDict` is created and returned.
+    T_destination = TypeVar('T_destination', bound=Mapping[str, Tensor])
+
+    @overload
+    def state_dict(self, destination: T_destination, prefix: str = ..., keep_vars: bool = ...) -> T_destination:
+        ...
+
+    # TODO: annotate with OrderedDict not Dict, but there is a problem:
+    # https://docs.python.org/3/library/typing.html#typing.OrderedDict
+    @overload
+    def state_dict(self, prefix: str = ..., keep_vars: bool = ...) -> Dict[str, Tensor]:
+        ...
+
+    def state_dict(self, destination=None, prefix='', keep_vars=False):
+        r"""Returns a dictionary containing a whole state of the module.
+
+        Both parameters and persistent buffers (e.g. running averages) are
+        included. Keys are corresponding parameter and buffer names.
+
+        Returns:
+            dict:
+                a dictionary containing a whole state of the module
+
+        Example::
+
+            >>> module.state_dict().keys()
+            ['bias', 'weight']
+
+        """
+        if destination is None:
+            destination = OrderedDict()
+            destination._metadata = OrderedDict()
+        destination._metadata[prefix[:-1]] = local_metadata = dict(version=self._version)
+        self._save_to_state_dict(destination, prefix, keep_vars)
+        for name, module in self._modules.items():
+            if module is not None:
+                module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
+        for hook in self._state_dict_hooks.values():
+            hook_result = hook(self, destination, prefix, local_metadata)
+            if hook_result is not None:
+                destination = hook_result
+        return destination
 
     def _get_name(self):
         return self.__class__.__name__
@@ -1804,6 +1929,9 @@ def numel(tensor):
 def randn(*shape):
   return tf.random.uniform(shape=shape)
 
+
+def detach(v, name=None):
+  return tf.stop_gradient(v, name=name)
 
 
 def calculate_gain(nonlinearity, param=None):
