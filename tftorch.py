@@ -23,6 +23,8 @@ import numpy as np
 
 import builtins as py
 
+import re
+
 # See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use
 # of `T` to annotate `self`. Many methods of `Module` return `self` and we want those return values to be
 # the type of the subclass, not the looser type of `Module`.
@@ -314,8 +316,8 @@ class Module(object):
         self._state_dict_hooks = OrderedDict()
         self._load_state_dict_pre_hooks = OrderedDict()
         self._modules = OrderedDict()
-        #self._init_scope = None
-        #self._forward_scope = None
+        self._input = None
+        self._output = None
 
     def get_scope_name(self, name=None, index=None, postfix=None, prefix=None):
       if name is None:
@@ -517,7 +519,9 @@ class Module(object):
         return self
 
     def __call__(self, *input, **kwargs):
+        self.__dict__['_input'] = [input, kwargs]
         result = self.forward(*input, **kwargs)
+        self.__dict__['_output'] = [result]
         return result
 
     def _named_members(self, get_members_fn, prefix='', recurse=True):
@@ -850,6 +854,21 @@ class Module(object):
         """
         return ''
 
+    def _pretty_sub(self, string):
+      rx = re.compile(r"""<tf.Tensor '(?P<name>.+?)' shape=[(](?P<shape>.*?)[)] dtype=(?P<dtype>.*?)>""")
+      def sub(m):
+        found = dict(m.groupdict())
+        if 'dtype' in found:
+          found['dtype'] = found['dtype'].replace('float', 'f')
+          found['dtype'] = found['dtype'].replace('int', 'i')
+        return "{dtype}[{shape}, name={name!r}]".format(**found)
+      return rx.sub(sub, string)
+
+    def pretty_repr(self, v):
+      s = repr(v)
+      s = self._pretty_sub(s)
+      return s
+
     def __repr__(self):
         # We treat the extra repr like the sub-module, one item per line
         extra_lines = []
@@ -858,6 +877,17 @@ class Module(object):
         if extra_repr:
             extra_lines = extra_repr.split('\n')
         child_lines = []
+        if self._input is not None:
+            args, kwargs = self._input
+            mod_str = self.pretty_repr(args)[1:-1]
+            if len(kwargs) > 0:
+              mod_str += ' ' + self.pretty_repr(kwargs)
+            mod_str = _addindent(mod_str, 2)
+            child_lines.append('IN:  ' + mod_str)
+        if self._output is not None:
+            mod_str = self.pretty_repr(self._output)[1:-1]
+            mod_str = _addindent(mod_str, 2)
+            child_lines.append('OUT: ' + mod_str)
         for key, module in self._modules.items():
             mod_str = repr(module)
             mod_str = _addindent(mod_str, 2)
@@ -865,6 +895,11 @@ class Module(object):
         lines = extra_lines + child_lines
 
         main_str = self._get_name() + '('
+        # if self._input is not None:
+        #     args, kwargs = self._input
+        #     main_str += repr(args)[1:-1]
+        #     if len(kwargs) > 0:
+        #       main_str += ' **' + repr(kwargs) + ','
         if lines:
             # simple one-liner info, which most builtin Modules will use
             if len(extra_lines) == 1 and not child_lines:
@@ -873,6 +908,8 @@ class Module(object):
                 main_str += '\n  ' + '\n  '.join(lines) + '\n'
 
         main_str += ')'
+        # if self._output is not None:
+        #     main_str += ' -> ' + repr(self._output)[1:-1]
         return main_str
 
     def __dir__(self):
