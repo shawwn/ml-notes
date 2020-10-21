@@ -671,7 +671,7 @@ class DeepGenerator512(nn.Module):
 
       self.first_view = 16 * chn
 
-      z_dim = dim_z + self.shared_dim
+      z_dim = dim_z + self.shared_dim + (dim_z if hier else 0)
 
       with self.scope('GenZ'):
         self.G_linear = SpectralNorm(nn.Linear(z_dim, 4 * 4 * 16 * chn, scope="G_linear"))
