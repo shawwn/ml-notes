@@ -299,6 +299,7 @@ def _addindent(s_, numSpaces):
 class Module(object):
     def __init__(self, scope=None, index=None, index_prefix='_', index_bias=0):
         self.training = True
+        self._parent_scope = tf.get_variable_scope().name
         self._scope = scope
         self._variable_scope = None
         self._index = index
@@ -316,7 +317,7 @@ class Module(object):
         #self._init_scope = None
         #self._forward_scope = None
 
-    def scope(self, name=None, index=None, postfix=None, **kwargs):
+    def get_scope_name(self, name=None, index=None, postfix=None, prefix=None):
       if name is None:
         if self._scope is None:
           name = type(self).__name__
@@ -329,7 +330,23 @@ class Module(object):
           name = name + self._index_prefix + str(index+self._index_bias)
       if postfix is not None:
         name = name + postfix
+      if prefix is not None:
+        name = prefix + name
+      return name
+
+    def scope(self, name=None, index=None, postfix=None, prefix=None, **kwargs):
+      name = self.get_scope_name(name=name, index=index, postfix=postfix, prefix=prefix)
       return tf.variable_scope(name, reuse=tf.AUTO_REUSE, **kwargs)
+
+    def as_default(self):
+      parent_scope = self._parent_scope
+      if not isinstance(parent_scope, six.string_types):
+        raise TypeError("parent_scope should be a string. "
+                        "Got {}".format(torch_typename(parent_scope)))
+      if len(parent_scope) > 0:
+        return self.scope(prefix=parent_scope+'/')
+      else:
+        return self.scope()
     
     def globalvar(self, name, **kws):
       return globalvar(name, **kws)
