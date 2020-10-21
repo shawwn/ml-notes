@@ -29,6 +29,7 @@ from tensorflow.python.util import compat
 from tensorflow.core.protobuf.tpu import topology_pb2
 from tensorflow.python.tpu import topology as topology_lib
 
+import gin
 
 try:
   from cloud_tpu_client import client  # pylint: disable=g-import-not-at-top
@@ -218,6 +219,7 @@ def patch_tensorflow():
 def patch_tensorflow_interactive():
   patch = patch_tensorflow()
   patch.__enter__()
+  gin.enter_interactive_mode()
   return patch
 
 def interact():

@@ -7,11 +7,21 @@ from six import with_metaclass
 from functools import partial
 
 from collections import OrderedDict
-from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict
+from typing import Union, Tuple, Any, Callable, Iterable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict
+
+from itertools import islice
+
+import operator
+
+#from torch._jit_internal import _copy_to_script_wrapper
+def _copy_to_script_wrapper(fn):
+  return fn
 
 import math
 
 import numpy as np
+
+import builtins as py
 
 # See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use
 # of `T` to annotate `self`. Many methods of `Module` return `self` and we want those return values to be
@@ -150,15 +160,163 @@ def localvar(name, **kws):
   use_resource = kws.pop('use_resource', True)
   return globalvar(name, **kws, collections=collections, trainable=trainable, use_resource=use_resource)
 
+# class Parameter(object):
+#   def __init__(self, initial_value, name, trainable=True):
+#     self.initial_value = initial_value
+#     self.trainable = trainable
+#     self.name = name
+
+
+from tensorflow.python.ops import resource_variable_ops
+from tensorflow.python.ops import variables
+
+class ParameterMeta(type):
+  def __init__(cls, *args, **kwargs):
+    print('ParameterMeta.__init__', cls, args, kwargs)
+  def __call__(cls, *args, **kwargs):
+    print('ParameterMeta.__call__', cls, args, kwargs)
+    if cls == Parameter:
+      #import pdb; pdb.set_trace()
+      name = kwargs.pop('name')
+      trainable = kwargs.pop('trainable', True)
+      (value,) = args
+      with absolute_variable_scope(reuse=tf.AUTO_REUSE):
+        v = globalvar(name, shape=size(value), dtype=value.dtype, trainable=trainable)
+      init_(v, value)
+      return v
+    return cls(*args, **kwargs)
+  def __instancecheck__(cls, instance):
+    if isinstance(instance, variables.Variable):
+      print('ParameterMeta.__instancecheck__', cls, instance)
+      return True
+    return super().__instancecheck__(instance)
+  def __subclasscheck__(cls, subclass):
+    if issubclass(subclass, variables.Variable):
+      print('ParameterMeta.__subclasscheck__', cls, subclass)
+      return True
+    return super().__subclasscheck__(subclass)
+
+class Parameter(object, metaclass=ParameterMeta):
+  def __init__(self, *args, **kwargs):
+    print('Parameter.__init__', args, kwargs)
+
+  def __new__(cls, *args, **kwargs):
+    print(['Parameter.__new__', cls, args, kwargs])
+    try:
+      instance = super().__new__(cls, *args, **kwargs)
+    except TypeError:
+      instance = super().__new__(cls)
+    return instance
+
+
+
+from tensorflow.python.framework import tensor_like
+
+class TensorMeta(type):
+  def __init__(cls, *args, **kwargs):
+    print('TensorMeta.__init__', cls, args, kwargs)
+  def __call__(cls, *args, **kwargs):
+    print('TensorMeta.__call__', cls, args, kwargs)
+    if cls == Tensor:
+      value = tf.zeros(shape=args, **kwargs)
+      return value
+    return cls(*args, **kwargs)
+  def __instancecheck__(cls, instance):
+    if isinstance(instance, tensor_like._TensorLike):
+      print('TensorMeta.__instancecheck__', cls, instance)
+      return True
+    return super().__instancecheck__(instance)
+  def __subclasscheck__(cls, subclass):
+    if issubclass(subclass, tensor_like._TensorLike):
+      print('TensorMeta.__subclasscheck__', cls, subclass)
+      return True
+    return super().__subclasscheck__(subclass)
+
+
+class Tensor(object, metaclass=TensorMeta):
+  def __init__(self, *args, **kwargs):
+    print('Tensor.__init__', args, kwargs)
+
+  def __new__(cls, *args, **kwargs):
+    print(['Tensor.__new__', cls, args, kwargs])
+    try:
+      instance = super().__new__(cls, *args, **kwargs)
+    except TypeError:
+      instance = super().__new__(cls, **kwargs)
+    if False and len(args) > 0 and isinstance(args[0], tf.Operation) and len(args[0].inputs) > 0:
+      handle = args[0].inputs[0]
+      if hasattr(handle, '_names'):
+        import pdb; pdb.set_trace()
+        instance._names = copy(handle._names)
+        print('Set names', instance._names)
+      else:
+        vs = tf.all_variables()
+        xs = [x.handle for x in vs if hasattr(x, 'handle')]
+        if handle in xs:
+          v = vs[xs.index(handle)]
+          if hasattr(v, '_names'):
+            instance._names = copy(v._names)
+            print('Set names', instance._names)
+      # print('TKTK')
+      # setattr(instance, '_names', args[0]._names)
+    return instance
+
+
+from copy import copy
+
+
+def TORCH_CHECK(condition, *message):
+  if not condition:
+    fmt = ' '.join(['%s' for x in message])
+    tf.logging.error(fmt, *message)
+    fmt = ' '.join(['{}' for x in message])
+    import pdb; pdb.set_trace()
+    raise ValueError(fmt.format(*message))
+
+TORCH_INTERNAL_ASSERT = TORCH_CHECK
+
+
+class ModuleAttributeError(AttributeError):
+    """ When `__getattr__` raises AttributeError inside a property,
+    AttributeError is raised with the property name instead of the
+    attribute that initially raised AttributeError, making the error
+    message uninformative. Using `ModuleAttributeError` instead
+    fixes this issue."""
+
+
+def _addindent(s_, numSpaces):
+    s = s_.split('\n')
+    # don't do anything for single-line stuff
+    if len(s) == 1:
+        return s_
+    first = s.pop(0)
+    s = [(numSpaces * ' ') + line for line in s]
+    s = '\n'.join(s)
+    s = first + '\n' + s
+    return s
+
 
 class Module(object):
-    def __init__(self, scope=None, index=None):
+    def __init__(self, scope=None, index=None, index_prefix='_', index_bias=0):
         self.training = True
-        self._modules = OrderedDict()
         self._scope = scope
+        self._variable_scope = None
         self._index = index
+        self._index_prefix = index_prefix
+        self._index_bias = index_bias
+        self._parameters = OrderedDict()
+        self._buffers = OrderedDict()
+        self._non_persistent_buffers_set = set()
+        self._backward_hooks = OrderedDict()
+        self._forward_hooks = OrderedDict()
+        self._forward_pre_hooks = OrderedDict()
+        self._state_dict_hooks = OrderedDict()
+        self._load_state_dict_pre_hooks = OrderedDict()
+        self._modules = OrderedDict()
+        #self._init_scope = None
+        #self._forward_scope = None
 
-    def scope(self, name=None, index=None, postfix=None, reuse=tf.AUTO_REUSE, **kwargs):
+    def scope(self, name=None, index=None, postfix=None, **kwargs):
       if name is None:
         if self._scope is None:
           name = type(self).__name__
@@ -168,10 +326,10 @@ class Module(object):
         index = self._index
       if index is not None:
         if index != 0:
-          name = name + '_' + str(index)
+          name = name + self._index_prefix + str(index+self._index_bias)
       if postfix is not None:
         name = name + postfix
-      return tf.variable_scope(name, reuse=reuse, **kwargs)
+      return tf.variable_scope(name, reuse=tf.AUTO_REUSE, **kwargs)
     
     def globalvar(self, name, **kws):
       return globalvar(name, **kws)
@@ -198,6 +356,103 @@ class Module(object):
         init_(v, value)
         setattr(self, name, v)
       return getattr(self, name)
+
+    def register_buffer(self, name: str, tensor: Optional[Tensor], persistent: py.bool = True) -> None:
+        r"""Adds a buffer to the module.
+
+        This is typically used to register a buffer that should not to be
+        considered a model parameter. For example, BatchNorm's ``running_mean``
+        is not a parameter, but is part of the module's state. Buffers, by
+        default, are persistent and will be saved alongside parameters. This
+        behavior can be changed by setting :attr:`persistent` to ``False``. The
+        only difference between a persistent buffer and a non-persistent buffer
+        is that the latter will not be a part of this module's
+        :attr:`state_dict`.
+
+        Buffers can be accessed as attributes using given names.
+
+        Args:
+            name (string): name of the buffer. The buffer can be accessed
+                from this module using the given name
+            tensor (Tensor): buffer to be registered.
+            persistent (bool): whether the buffer is part of this module's
+                :attr:`state_dict`.
+
+        Example::
+
+            >>> self.register_buffer('running_mean', torch.zeros(num_features))
+
+        """
+        # if persistent is False and isinstance(self, torch.jit.ScriptModule):
+        #     raise RuntimeError("ScriptModule does not support non-persistent buffers")
+
+        if '_buffers' not in self.__dict__:
+            raise AttributeError(
+                "cannot assign buffer before Module.__init__() call")
+        elif not isinstance(name, six.string_types):
+            raise TypeError("buffer name should be a string. "
+                            "Got {}".format(torch_typename(name)))
+        elif '.' in name:
+            raise KeyError("buffer name can't contain \".\"")
+        elif name == '':
+            raise KeyError("buffer name can't be empty string \"\"")
+        elif hasattr(self, name) and name not in self._buffers:
+            raise KeyError("attribute '{}' already exists".format(name))
+        elif tensor is not None and not isinstance(tensor, Tensor):
+            # import pdb; pdb.set_trace()
+            raise TypeError("cannot assign '{}' object to buffer '{}' "
+                            "(torch Tensor or None required)"
+                            .format(torch_typename(tensor), name))
+        else:
+            if not isinstance(tensor, Parameter):
+                tensor = Parameter(tensor, trainable=False, name=name)
+            self._buffers[name] = tensor
+            if persistent:
+                self._non_persistent_buffers_set.discard(name)
+            else:
+                self._non_persistent_buffers_set.add(name)
+
+    def register_parameter(self, name: str, param: Optional[Parameter]) -> None:
+        r"""Adds a parameter to the module.
+
+        The parameter can be accessed as an attribute using given name.
+
+        Args:
+            name (string): name of the parameter. The parameter can be accessed
+                from this module using the given name
+            param (Parameter): parameter to be added to the module.
+        """
+        if '_parameters' not in self.__dict__:
+            raise AttributeError(
+                "cannot assign parameter before Module.__init__() call")
+
+        elif not isinstance(name, six.string_types):
+            raise TypeError("parameter name should be a string. "
+                            "Got {}".format(torch_typename(name)))
+        elif '.' in name:
+            raise KeyError("parameter name can't contain \".\"")
+        elif name == '':
+            raise KeyError("parameter name can't be empty string \"\"")
+        elif hasattr(self, name) and name not in self._parameters:
+            raise KeyError("attribute '{}' already exists".format(name))
+
+        if not isinstance(param, Parameter) and isinstance(param, Tensor):
+            param = self.globalvar(name, param)
+
+        if param is None:
+            self._parameters[name] = None
+        elif not isinstance(param, Parameter):
+            raise TypeError("cannot assign '{}' object to parameter '{}' "
+                            "(torch.nn.Parameter or None required)"
+                            .format(torch_typename(param), name))
+        elif getattr(param, 'grad_fn', None):
+            raise ValueError(
+                "Cannot assign non-leaf Tensor to parameter '{0}'. Model "
+                "parameters must be created explicitly. To express '{0}' "
+                "as a function of another Tensor, compute the value in "
+                "the forward() method.".format(name))
+        else:
+            self._parameters[name] = param
 
     def add_module(self, name: str, module: Optional['Module']) -> None:
         r"""Adds a child module to the current module.
@@ -247,6 +502,117 @@ class Module(object):
     def __call__(self, *input, **kwargs):
         result = self.forward(*input, **kwargs)
         return result
+
+    def _named_members(self, get_members_fn, prefix='', recurse=True):
+        r"""Helper method for yielding various names + members of modules."""
+        memo = set()
+        modules = self.named_modules(prefix=prefix) if recurse else [(prefix, self)]
+        for module_prefix, module in modules:
+            members = get_members_fn(module)
+            for k, v in members:
+                if v is None or v in memo:
+                    continue
+                memo.add(v)
+                name = module_prefix + ('.' if module_prefix else '') + k
+                yield name, v
+
+    def parameters(self, recurse: py.bool = True) -> Iterator[Parameter]:
+        r"""Returns an iterator over module parameters.
+
+        This is typically passed to an optimizer.
+
+        Args:
+            recurse (bool): if True, then yields parameters of this module
+                and all submodules. Otherwise, yields only parameters that
+                are direct members of this module.
+
+        Yields:
+            Parameter: module parameter
+
+        Example::
+
+            >>> for param in model.parameters():
+            >>>     print(type(param), param.size())
+            <class 'torch.Tensor'> (20L,)
+            <class 'torch.Tensor'> (20L, 1L, 5L, 5L)
+
+        """
+        for name, param in self.named_parameters(recurse=recurse):
+            yield param
+
+    def named_parameters(self, prefix: str = '', recurse: py.bool = True) -> Iterator[Tuple[str, Tensor]]:
+        r"""Returns an iterator over module parameters, yielding both the
+        name of the parameter as well as the parameter itself.
+
+        Args:
+            prefix (str): prefix to prepend to all parameter names.
+            recurse (bool): if True, then yields parameters of this module
+                and all submodules. Otherwise, yields only parameters that
+                are direct members of this module.
+
+        Yields:
+            (string, Parameter): Tuple containing the name and parameter
+
+        Example::
+
+            >>> for name, param in self.named_parameters():
+            >>>    if name in ['bias']:
+            >>>        print(param.size())
+
+        """
+        gen = self._named_members(
+            lambda module: module._parameters.items(),
+            prefix=prefix, recurse=recurse)
+        for elem in gen:
+            yield elem
+
+    def buffers(self, recurse: py.bool = True) -> Iterator[Tensor]:
+        r"""Returns an iterator over module buffers.
+
+        Args:
+            recurse (bool): if True, then yields buffers of this module
+                and all submodules. Otherwise, yields only buffers that
+                are direct members of this module.
+
+        Yields:
+            torch.Tensor: module buffer
+
+        Example::
+
+            >>> for buf in model.buffers():
+            >>>     print(type(buf), buf.size())
+            <class 'torch.Tensor'> (20L,)
+            <class 'torch.Tensor'> (20L, 1L, 5L, 5L)
+
+        """
+        for name, buf in self.named_buffers(recurse=recurse):
+            yield buf
+
+    def named_buffers(self, prefix: str = '', recurse: py.bool = True) -> Iterator[Tuple[str, Tensor]]:
+        r"""Returns an iterator over module buffers, yielding both the
+        name of the buffer as well as the buffer itself.
+
+        Args:
+            prefix (str): prefix to prepend to all buffer names.
+            recurse (bool): if True, then yields buffers of this module
+                and all submodules. Otherwise, yields only buffers that
+                are direct members of this module.
+
+        Yields:
+            (string, torch.Tensor): Tuple containing the name and buffer
+
+        Example::
+
+            >>> for name, buf in self.named_buffers():
+            >>>    if name in ['running_var']:
+            >>>        print(buf.size())
+
+        """
+        gen = self._named_members(
+            lambda module: module._buffers.items(),
+            prefix=prefix, recurse=recurse)
+        for elem in gen:
+            yield elem
 
     def children(self) -> Iterator['Module']:
         r"""Returns an iterator over immediate children modules.
@@ -380,6 +746,175 @@ class Module(object):
         return self.train(False)
 
 
+    def __getattr__(self, name: str) -> Union[Tensor, 'Module']:
+        if '_parameters' in self.__dict__:
+            _parameters = self.__dict__['_parameters']
+            if name in _parameters:
+                return _parameters[name]
+        if '_buffers' in self.__dict__:
+            _buffers = self.__dict__['_buffers']
+            if name in _buffers:
+                return _buffers[name]
+        if '_modules' in self.__dict__:
+            modules = self.__dict__['_modules']
+            if name in modules:
+                return modules[name]
+        raise ModuleAttributeError("'{}' object has no attribute '{}'".format(
+            type(self).__name__, name))
+
+    def __setattr__(self, name: str, value: Union[Tensor, 'Module']) -> None:
+        def remove_from(*dicts_or_sets):
+            for d in dicts_or_sets:
+                if name in d:
+                    if isinstance(d, dict):
+                        del d[name]
+                    else:
+                        d.discard(name)
+
+        params = self.__dict__.get('_parameters')
+        if isinstance(value, Parameter):
+            if params is None:
+                raise AttributeError(
+                    "cannot assign parameters before Module.__init__() call")
+            remove_from(self.__dict__, self._buffers, self._modules, self._non_persistent_buffers_set)
+            self.register_parameter(name, value)
+        elif params is not None and name in params:
+            if value is not None:
+                raise TypeError("cannot assign '{}' as parameter '{}' "
+                                "(torch.nn.Parameter or None expected)"
+                                .format(torch_typename(value), name))
+            self.register_parameter(name, value)
+        else:
+            modules = self.__dict__.get('_modules')
+            if isinstance(value, Module):
+                if modules is None:
+                    raise AttributeError(
+                        "cannot assign module before Module.__init__() call")
+                remove_from(self.__dict__, self._parameters, self._buffers, self._non_persistent_buffers_set)
+                modules[name] = value
+            elif modules is not None and name in modules:
+                if value is not None:
+                    raise TypeError("cannot assign '{}' as child module '{}' "
+                                    "(torch.nn.Module or None expected)"
+                                    .format(torch_typename(value), name))
+                modules[name] = value
+            else:
+                buffers = self.__dict__.get('_buffers')
+                if buffers is not None and name in buffers:
+                    if value is not None and not isinstance(value, torch.Tensor):
+                        raise TypeError("cannot assign '{}' as buffer '{}' "
+                                        "(torch.Tensor or None expected)"
+                                        .format(torch_typename(value), name))
+                    buffers[name] = value
+                else:
+                    object.__setattr__(self, name, value)
+
+    def __delattr__(self, name):
+        if name in self._parameters:
+            del self._parameters[name]
+        elif name in self._buffers:
+            del self._buffers[name]
+            self._non_persistent_buffers_set.discard(name)
+        elif name in self._modules:
+            del self._modules[name]
+        else:
+            object.__delattr__(self, name)
+
+
+    def _get_name(self):
+        return self.__class__.__name__
+
+    def extra_repr(self) -> str:
+        r"""Set the extra representation of the module
+
+        To print customized extra information, you should re-implement
+        this method in your own modules. Both single-line and multi-line
+        strings are acceptable.
+        """
+        return ''
+
+    def __repr__(self):
+        # We treat the extra repr like the sub-module, one item per line
+        extra_lines = []
+        extra_repr = self.extra_repr()
+        # empty string will be split into list ['']
+        if extra_repr:
+            extra_lines = extra_repr.split('\n')
+        child_lines = []
+        for key, module in self._modules.items():
+            mod_str = repr(module)
+            mod_str = _addindent(mod_str, 2)
+            child_lines.append('(' + key + '): ' + mod_str)
+        lines = extra_lines + child_lines
+
+        main_str = self._get_name() + '('
+        if lines:
+            # simple one-liner info, which most builtin Modules will use
+            if len(extra_lines) == 1 and not child_lines:
+                main_str += extra_lines[0]
+            else:
+                main_str += '\n  ' + '\n  '.join(lines) + '\n'
+
+        main_str += ')'
+        return main_str
+
+    def __dir__(self):
+        module_attrs = dir(self.__class__)
+        attrs = list(self.__dict__.keys())
+        parameters = list(self._parameters.keys())
+        modules = list(self._modules.keys())
+        buffers = list(self._buffers.keys())
+        keys = module_attrs + attrs + parameters + modules + buffers
+
+        # Eliminate attrs that are not legal Python variable names
+        keys = [key for key in keys if not key[0].isdigit()]
+
+        return sorted(keys)
+
+
+
+
+# class Sequential(Module):
+#     r"""A sequential container.
+#     Modules will be added to it in the order they are passed in the constructor.
+#     Alternatively, an ordered dict of modules can also be passed in.
+
+#     To make it easier to understand, here is a small example::
+
+#         # Example of using Sequential
+#         model = nn.Sequential(
+#                   nn.Conv2d(1,20,5),
+#                   nn.ReLU(),
+#                   nn.Conv2d(20,64,5),
+#                   nn.ReLU()
+#                 )
+
+#         # Example of using Sequential with OrderedDict
+#         model = nn.Sequential(OrderedDict([
+#                   ('conv1', nn.Conv2d(1,20,5)),
+#                   ('relu1', nn.ReLU()),
+#                   ('conv2', nn.Conv2d(20,64,5)),
+#                   ('relu2', nn.ReLU())
+#                 ]))
+#     """
+
+#     def __init__(self, *args: Any):
+#         super(Sequential, self).__init__()
+#         if len(args) == 1 and isinstance(args[0], OrderedDict):
+#             for key, module in args[0].items():
+#                 self.add_module(key, module)
+#         else:
+#             for idx, module in enumerate(args):
+#                 self.add_module(str(idx), module)
+
+#     def __iter__(self) -> Iterator[Module]:
+#         return iter(self._modules.values())
+
+#     def forward(self, input, *args, **kwargs):
+#         for module in self:
+#             input = module(input, *args, **kwargs)
+#         return input
+
 
 
 class Sequential(Module):
@@ -406,6 +941,14 @@ class Sequential(Module):
                 ]))
     """
 
+    @overload
+    def __init__(self, *args: Module) -> None:
+        ...
+
+    @overload
+    def __init__(self, arg: 'OrderedDict[str, Module]') -> None:
+        ...
+
     def __init__(self, *args: Any):
         super(Sequential, self).__init__()
         if len(args) == 1 and isinstance(args[0], OrderedDict):
@@ -415,13 +958,585 @@ class Sequential(Module):
             for idx, module in enumerate(args):
                 self.add_module(str(idx), module)
 
+    def _get_item_by_idx(self, iterator, idx):
+        """Get the idx-th item of the iterator"""
+        size = len(self)
+        idx = operator.index(idx)
+        if not -size <= idx < size:
+            raise IndexError('index {} is out of range'.format(idx))
+        idx %= size
+        return next(islice(iterator, idx, None))
+
+    @_copy_to_script_wrapper
+    def __getitem__(self: T, idx) -> T:
+        if isinstance(idx, slice):
+            return self.__class__(OrderedDict(list(self._modules.items())[idx]))
+        else:
+            return self._get_item_by_idx(self._modules.values(), idx)
+
+    def __setitem__(self, idx: int, module: Module) -> None:
+        key = self._get_item_by_idx(self._modules.keys(), idx)
+        return setattr(self, key, module)
+
+    def __delitem__(self, idx: Union[slice, int]) -> None:
+        if isinstance(idx, slice):
+            for key in list(self._modules.keys())[idx]:
+                delattr(self, key)
+        else:
+            key = self._get_item_by_idx(self._modules.keys(), idx)
+            delattr(self, key)
+
+    @_copy_to_script_wrapper
+    def __len__(self) -> int:
+        return len(self._modules)
+
+    @_copy_to_script_wrapper
+    def __dir__(self):
+        keys = super(Sequential, self).__dir__()
+        keys = [key for key in keys if not key.isdigit()]
+        return keys
+
+    @_copy_to_script_wrapper
     def __iter__(self) -> Iterator[Module]:
         return iter(self._modules.values())
 
-    def forward(self, input, *args, **kwargs):
+    # NB: We can't really type check this function as the type of input
+    # may change dynamically (as is tested in
+    # TestScript.test_sequential_intermediary_types).  Cannot annotate
+    # with Any as TorchScript expects a more precise type
+    def forward(self, input):
         for module in self:
-            input = module(input, *args, **kwargs)
+            input = module(input)
         return input
+
+
+class ModuleList(Module):
+    r"""Holds submodules in a list.
+
+    :class:`~torch.nn.ModuleList` can be indexed like a regular Python list, but
+    modules it contains are properly registered, and will be visible by all
+    :class:`~torch.nn.Module` methods.
+
+    Arguments:
+        modules (iterable, optional): an iterable of modules to add
+
+    Example::
+
+        class MyModule(nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.linears = nn.ModuleList([nn.Linear(10, 10) for i in range(10)])
+
+            def forward(self, x):
+                # ModuleList can act as an iterable, or be indexed using ints
+                for i, l in enumerate(self.linears):
+                    x = self.linears[i // 2](x) + l(x)
+                return x
+    """
+
+    def __init__(self, modules: Optional[Iterable[Module]] = None) -> None:
+        super(ModuleList, self).__init__()
+        if modules is not None:
+            self += modules
+
+    def _get_abs_string_index(self, idx):
+        """Get the absolute index for the list of modules"""
+        idx = operator.index(idx)
+        if not (-len(self) <= idx < len(self)):
+            raise IndexError('index {} is out of range'.format(idx))
+        if idx < 0:
+            idx += len(self)
+        return str(idx)
+
+    @_copy_to_script_wrapper
+    def __getitem__(self, idx: int) -> Module:
+        if isinstance(idx, slice):
+            return self.__class__(list(self._modules.values())[idx])
+        else:
+            return self._modules[self._get_abs_string_index(idx)]
+
+    def __setitem__(self, idx: int, module: Module) -> None:
+        idx = self._get_abs_string_index(idx)
+        return setattr(self, str(idx), module)
+
+    def __delitem__(self, idx: Union[int, slice]) -> None:
+        if isinstance(idx, slice):
+            for k in range(len(self._modules))[idx]:
+                delattr(self, str(k))
+        else:
+            delattr(self, self._get_abs_string_index(idx))
+        # To preserve numbering, self._modules is being reconstructed with modules after deletion
+        str_indices = [str(i) for i in range(len(self._modules))]
+        self._modules = OrderedDict(list(zip(str_indices, self._modules.values())))
+
+    @_copy_to_script_wrapper
+    def __len__(self) -> int:
+        return len(self._modules)
+
+    @_copy_to_script_wrapper
+    def __iter__(self) -> Iterator[Module]:
+        return iter(self._modules.values())
+
+    def __iadd__(self: T, modules: Iterable[Module]) -> T:
+        return self.extend(modules)
+
+    @_copy_to_script_wrapper
+    def __dir__(self):
+        keys = super(ModuleList, self).__dir__()
+        keys = [key for key in keys if not key.isdigit()]
+        return keys
+
+    def insert(self, index: int, module: Module) -> None:
+        r"""Insert a given module before a given index in the list.
+
+        Arguments:
+            index (int): index to insert.
+            module (nn.Module): module to insert
+        """
+        for i in range(len(self._modules), index, -1):
+            self._modules[str(i)] = self._modules[str(i - 1)]
+        self._modules[str(index)] = module
+
+    def append(self: T, module: Module) -> T:
+        r"""Appends a given module to the end of the list.
+
+        Arguments:
+            module (nn.Module): module to append
+        """
+        self.add_module(str(len(self)), module)
+        return self
+
+    def extend(self: T, modules: Iterable[Module]) -> T:
+        r"""Appends modules from a Python iterable to the end of the list.
+
+        Arguments:
+            modules (iterable): iterable of modules to append
+        """
+        if not isinstance(modules, container_abcs.Iterable):
+            raise TypeError("ModuleList.extend should be called with an "
+                            "iterable, but got " + type(modules).__name__)
+        offset = len(self)
+        for i, module in enumerate(modules):
+            self.add_module(str(offset + i), module)
+        return self
+
+    def forward(self):
+        raise NotImplementedError()
+
+
+class ModuleDict(Module):
+    r"""Holds submodules in a dictionary.
+
+    :class:`~torch.nn.ModuleDict` can be indexed like a regular Python dictionary,
+    but modules it contains are properly registered, and will be visible by all
+    :class:`~torch.nn.Module` methods.
+
+    :class:`~torch.nn.ModuleDict` is an **ordered** dictionary that respects
+
+    * the order of insertion, and
+
+    * in :meth:`~torch.nn.ModuleDict.update`, the order of the merged 
+      ``OrderedDict``, ``dict`` (started from Python 3.6) or another
+      :class:`~torch.nn.ModuleDict` (the argument to 
+      :meth:`~torch.nn.ModuleDict.update`).
+
+    Note that :meth:`~torch.nn.ModuleDict.update` with other unordered mapping
+    types (e.g., Python's plain ``dict`` before Python version 3.6) does not
+    preserve the order of the merged mapping.
+
+    Arguments:
+        modules (iterable, optional): a mapping (dictionary) of (string: module)
+            or an iterable of key-value pairs of type (string, module)
+
+    Example::
+
+        class MyModule(nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.choices = nn.ModuleDict({
+                        'conv': nn.Conv2d(10, 10, 3),
+                        'pool': nn.MaxPool2d(3)
+                })
+                self.activations = nn.ModuleDict([
+                        ['lrelu', nn.LeakyReLU()],
+                        ['prelu', nn.PReLU()]
+                ])
+
+            def forward(self, x, choice, act):
+                x = self.choices[choice](x)
+                x = self.activations[act](x)
+                return x
+    """
+
+    def __init__(self, modules: Optional[Mapping[str, Module]] = None) -> None:
+        super(ModuleDict, self).__init__()
+        if modules is not None:
+            self.update(modules)
+
+    @_copy_to_script_wrapper
+    def __getitem__(self, key: str) -> Module:
+        return self._modules[key]
+
+    def __setitem__(self, key: str, module: Module) -> None:
+        self.add_module(key, module)
+
+    def __delitem__(self, key: str) -> None:
+        del self._modules[key]
+
+    @_copy_to_script_wrapper
+    def __len__(self) -> int:
+        return len(self._modules)
+
+    @_copy_to_script_wrapper
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._modules)
+
+    @_copy_to_script_wrapper
+    def __contains__(self, key: str) -> bool:
+        return key in self._modules
+
+    def clear(self) -> None:
+        """Remove all items from the ModuleDict.
+        """
+        self._modules.clear()
+
+    def pop(self, key: str) -> Module:
+        r"""Remove key from the ModuleDict and return its module.
+
+        Arguments:
+            key (string): key to pop from the ModuleDict
+        """
+        v = self[key]
+        del self[key]
+        return v
+
+    @_copy_to_script_wrapper
+    def keys(self) -> Iterable[str]:
+        r"""Return an iterable of the ModuleDict keys.
+        """
+        return self._modules.keys()
+
+    @_copy_to_script_wrapper
+    def items(self) -> Iterable[Tuple[str, Module]]:
+        r"""Return an iterable of the ModuleDict key/value pairs.
+        """
+        return self._modules.items()
+
+    @_copy_to_script_wrapper
+    def values(self) -> Iterable[Module]:
+        r"""Return an iterable of the ModuleDict values.
+        """
+        return self._modules.values()
+
+    def update(self, modules: Mapping[str, Module]) -> None:
+        r"""Update the :class:`~torch.nn.ModuleDict` with the key-value pairs from a
+        mapping or an iterable, overwriting existing keys.
+
+        .. note::
+            If :attr:`modules` is an ``OrderedDict``, a :class:`~torch.nn.ModuleDict`, or
+            an iterable of key-value pairs, the order of new elements in it is preserved.
+
+        Arguments:
+            modules (iterable): a mapping (dictionary) from string to :class:`~torch.nn.Module`,
+                or an iterable of key-value pairs of type (string, :class:`~torch.nn.Module`)
+        """
+        if not isinstance(modules, container_abcs.Iterable):
+            raise TypeError("ModuleDict.update should be called with an "
+                            "iterable of key/value pairs, but got " +
+                            type(modules).__name__)
+
+        if isinstance(modules, (OrderedDict, ModuleDict, container_abcs.Mapping)):
+            for key, module in modules.items():
+                self[key] = module
+        else:
+            for j, m in enumerate(modules):
+                if not isinstance(m, container_abcs.Iterable):
+                    raise TypeError("ModuleDict update sequence element "
+                                    "#" + str(j) + " should be Iterable; is" +
+                                    type(m).__name__)
+                if not len(m) == 2:
+                    raise ValueError("ModuleDict update sequence element "
+                                     "#" + str(j) + " has length " + str(len(m)) +
+                                     "; 2 is required")
+                self[m[0]] = m[1]
+
+    def forward(self):
+        raise NotImplementedError()
+
+
+class ParameterList(Module):
+    r"""Holds parameters in a list.
+
+    :class:`~torch.nn.ParameterList` can be indexed like a regular Python
+    list, but parameters it contains are properly registered, and will be
+    visible by all :class:`~torch.nn.Module` methods.
+
+    Arguments:
+        parameters (iterable, optional): an iterable of :class:`~torch.nn.Parameter` to add
+
+    Example::
+
+        class MyModule(nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.params = nn.ParameterList([nn.Parameter(torch.randn(10, 10)) for i in range(10)])
+
+            def forward(self, x):
+                # ParameterList can act as an iterable, or be indexed using ints
+                for i, p in enumerate(self.params):
+                    x = self.params[i // 2].mm(x) + p.mm(x)
+                return x
+    """
+
+    def __init__(self, parameters: Optional[Iterable['Parameter']] = None) -> None:
+        super(ParameterList, self).__init__()
+        if parameters is not None:
+            self += parameters
+
+    def _get_abs_string_index(self, idx):
+        """Get the absolute index for the list of modules"""
+        idx = operator.index(idx)
+        if not (-len(self) <= idx < len(self)):
+            raise IndexError('index {} is out of range'.format(idx))
+        if idx < 0:
+            idx += len(self)
+        return str(idx)
+
+    @overload
+    def __getitem__(self, idx: int) -> 'Parameter':
+        ...
+
+    @overload
+    def __getitem__(self: T, idx: slice) -> T:
+        ...
+
+    def __getitem__(self, idx):
+        if isinstance(idx, slice):
+            return self.__class__(list(self._parameters.values())[idx])
+        else:
+            idx = self._get_abs_string_index(idx)
+            return self._parameters[str(idx)]
+
+    def __setitem__(self, idx: int, param: 'Parameter') -> None:
+        idx = self._get_abs_string_index(idx)
+        return self.register_parameter(str(idx), param)
+
+    def __setattr__(self, key: Any, value: Any) -> None:
+        if not isinstance(value, torch.nn.Parameter):
+            warnings.warn("Setting attributes on ParameterList is not supported.")
+        super(ParameterList, self).__setattr__(key, value)
+
+    def __len__(self) -> int:
+        return len(self._parameters)
+
+    def __iter__(self) -> Iterator['Parameter']:
+        return iter(self._parameters.values())
+
+    def __iadd__(self: T, parameters: Iterable['Parameter']) -> T:
+        return self.extend(parameters)
+
+    def __dir__(self):
+        keys = super(ParameterList, self).__dir__()
+        keys = [key for key in keys if not key.isdigit()]
+        return keys
+
+    def append(self: T, parameter: 'Parameter') -> T:
+        """Appends a given parameter at the end of the list.
+
+        Arguments:
+            parameter (nn.Parameter): parameter to append
+        """
+        self.register_parameter(str(len(self)), parameter)
+        return self
+
+    def extend(self: T, parameters: Iterable['Parameter']) -> T:
+        """Appends parameters from a Python iterable to the end of the list.
+
+        Arguments:
+            parameters (iterable): iterable of parameters to append
+        """
+        if not isinstance(parameters, container_abcs.Iterable):
+            raise TypeError("ParameterList.extend should be called with an "
+                            "iterable, but got " + type(parameters).__name__)
+        offset = len(self)
+        for i, param in enumerate(parameters):
+            self.register_parameter(str(offset + i), param)
+        return self
+
+    def extra_repr(self) -> str:
+        child_lines = []
+        for k, p in self._parameters.items():
+            size_str = 'x'.join(str(size) for size in p.size())
+            device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
+            parastr = 'Parameter containing: [{} of size {}{}]'.format(
+                torch.typename(p), size_str, device_str)
+            child_lines.append('  (' + str(k) + '): ' + parastr)
+        tmpstr = '\n'.join(child_lines)
+        return tmpstr
+
+    def __call__(self, input):
+        raise RuntimeError('ParameterList should not be called.')
+
+    def _replicate_for_data_parallel(self):
+        warnings.warn("nn.ParameterList is being used with DataParallel but this is not "
+                      "supported. This list will appear empty for the models replicated "
+                      "on each GPU except the original one.")
+
+        return super(ParameterList, self)._replicate_for_data_parallel()
+
+
+class ParameterDict(Module):
+    r"""Holds parameters in a dictionary.
+
+    ParameterDict can be indexed like a regular Python dictionary, but parameters it
+    contains are properly registered, and will be visible by all Module methods.
+
+    :class:`~torch.nn.ParameterDict` is an **ordered** dictionary that respects
+
+    * the order of insertion, and
+
+    * in :meth:`~torch.nn.ParameterDict.update`, the order of the merged ``OrderedDict``
+      or another :class:`~torch.nn.ParameterDict` (the argument to
+      :meth:`~torch.nn.ParameterDict.update`).
+
+    Note that :meth:`~torch.nn.ParameterDict.update` with other unordered mapping
+    types (e.g., Python's plain ``dict``) does not preserve the order of the
+    merged mapping.
+
+    Arguments:
+        parameters (iterable, optional): a mapping (dictionary) of
+            (string : :class:`~torch.nn.Parameter`) or an iterable of key-value pairs
+            of type (string, :class:`~torch.nn.Parameter`)
+
+    Example::
+
+        class MyModule(nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.params = nn.ParameterDict({
+                        'left': nn.Parameter(torch.randn(5, 10)),
+                        'right': nn.Parameter(torch.randn(5, 10))
+                })
+
+            def forward(self, x, choice):
+                x = self.params[choice].mm(x)
+                return x
+    """
+
+    def __init__(self, parameters: Optional[Mapping[str, 'Parameter']] = None) -> None:
+        super(ParameterDict, self).__init__()
+        if parameters is not None:
+            self.update(parameters)
+
+    def __getitem__(self, key: str) -> 'Parameter':
+        return self._parameters[key]
+
+    def __setitem__(self, key: str, parameter: 'Parameter') -> None:
+        self.register_parameter(key, parameter)
+
+    def __delitem__(self, key: str) -> None:
+        del self._parameters[key]
+
+    def __setattr__(self, key: Any, value: Any) -> None:
+        if not isinstance(value, torch.nn.Parameter):
+            warnings.warn("Setting attributes on ParameterDict is not supported.")
+        super(ParameterDict, self).__setattr__(key, value)
+
+    def __len__(self) -> int:
+        return len(self._parameters)
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._parameters.keys())
+
+    def __contains__(self, key: str) -> bool:
+        return key in self._parameters
+
+    def clear(self) -> None:
+        """Remove all items from the ParameterDict.
+        """
+        self._parameters.clear()
+
+    def pop(self, key: str) -> 'Parameter':
+        r"""Remove key from the ParameterDict and return its parameter.
+
+        Arguments:
+            key (string): key to pop from the ParameterDict
+        """
+        v = self[key]
+        del self[key]
+        return v
+
+    def keys(self) -> Iterable[str]:
+        r"""Return an iterable of the ParameterDict keys.
+        """
+        return self._parameters.keys()
+
+    def items(self) -> Iterable[Tuple[str, 'Parameter']]:
+        r"""Return an iterable of the ParameterDict key/value pairs.
+        """
+        return self._parameters.items()
+
+    def values(self) -> Iterable['Parameter']:
+        r"""Return an iterable of the ParameterDict values.
+        """
+        return self._parameters.values()
+
+    def update(self, parameters: Mapping[str, 'Parameter']) -> None:
+        r"""Update the :class:`~torch.nn.ParameterDict` with the key-value pairs from a
+        mapping or an iterable, overwriting existing keys.
+
+        .. note::
+            If :attr:`parameters` is an ``OrderedDict``, a :class:`~torch.nn.ParameterDict`, or
+            an iterable of key-value pairs, the order of new elements in it is preserved.
+
+        Arguments:
+            parameters (iterable): a mapping (dictionary) from string to
+                :class:`~torch.nn.Parameter`, or an iterable of
+                key-value pairs of type (string, :class:`~torch.nn.Parameter`)
+        """
+        if not isinstance(parameters, container_abcs.Iterable):
+            raise TypeError("ParametersDict.update should be called with an "
+                            "iterable of key/value pairs, but got " +
+                            type(parameters).__name__)
+
+        if isinstance(parameters, (OrderedDict, ParameterDict)):
+            for key, parameter in parameters.items():
+                self[key] = parameter
+        elif isinstance(parameters, container_abcs.Mapping):
+            for key, parameter in sorted(parameters.items()):
+                self[key] = parameter
+        else:
+            for j, p in enumerate(parameters):
+                if not isinstance(p, container_abcs.Iterable):
+                    raise TypeError("ParameterDict update sequence element "
+                                    "#" + str(j) + " should be Iterable; is" +
+                                    type(p).__name__)
+                if not len(p) == 2:
+                    raise ValueError("ParameterDict update sequence element "
+                                     "#" + str(j) + " has length " + str(len(p)) +
+                                     "; 2 is required")
+                self[p[0]] = p[1]
+
+    def extra_repr(self) -> str:
+        child_lines = []
+        for k, p in self._parameters.items():
+            size_str = 'x'.join(str(size) for size in p.size())
+            device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
+            parastr = 'Parameter containing: [{} of size {}{}]'.format(
+                torch.typename(p), size_str, device_str)
+            child_lines.append('  (' + k + '): ' + parastr)
+        tmpstr = '\n'.join(child_lines)
+        return tmpstr
+
+    def __call__(self, input):
+        raise RuntimeError('ParameterDict should not be called.')
+
+    def _replicate_for_data_parallel(self):
+        warnings.warn("nn.ParameterDict is being used with DataParallel but this is not "
+                      "supported. This dict will appear empty for the models replicated "
+                      "on each GPU except the original one.")
+
+        return super(ParameterDict, self)._replicate_for_data_parallel()
 
 
   
@@ -494,7 +1609,7 @@ def linear(input, weight, bias=None):
         output = tf.nn.bias_add(output, bias)
     return output
 
-Tensor = tf.Variable
+#Tensor = tf.Variable
 
 class Linear(Module):
     r"""Applies a linear transformation to the incoming data: :math:`y = xA^T + b`

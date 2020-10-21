@@ -6,6 +6,7 @@ import numpy as np
 import tensorflow.compat.v1 as tf
 
 from absl import app
+from absl import logging
 
 from tensorflow.core.protobuf import config_pb2
 from tensorflow.core.protobuf import tensorflow_server_pb2
@@ -26,9 +27,10 @@ from tensorflow.python.training import server_lib
 from tensorflow.python.tpu import tpu
 
 import train_runner
-from train_flags import FLAGS
+from train_flags import flags, FLAGS
 
 from pprint import pprint as pp
+from pprint import pformat as pf
 
 # from model_fns import gpt2_model, gpt2_rev_model
 # from input_fns import gpt2_input
@@ -38,6 +40,18 @@ import json
 from tfjpg_parser import ImageNet, iterate_dataset
 
 import tflex
+
+import BigGAN
+
+import gin
+
+flags.DEFINE_multi_string(
+    "gin_config", [],
+    "List of paths to the config files.")
+flags.DEFINE_multi_string(
+    "gin_bindings", [],
+    "Newline separated list of Gin parameter bindings.")
+
 
 def parseval(value, dtype, default=None):
   if dtype == 'str' or isinstance(default, str):
@@ -67,23 +81,25 @@ def getval(name, default, dtype=None):
     tf.logging.info('getval(%s, %s) = params[%s] = %s', repr(name), repr(default), repr(name), repr(value))
   return value
 
+@gin.configurable
+def options(**kwargs):
+  return dict(**kwargs)
 
 def main(unused_argv):
+  logging.info("Gin config: %s\nGin bindings: %s",
+               FLAGS.gin_config, FLAGS.gin_bindings)
+  gin.parse_config_files_and_bindings(FLAGS.gin_config, FLAGS.gin_bindings)
   global params
   #FLAGS.iterations_per_loop = 100
   #params = {'batch_size': FLAGS.train_batch_size}
   #params = {'batch_size': 128, 'use_tpu': True, 'precision': 'float32'}
-  with open(FLAGS.params) as f:
-    params = json.load(f)
+  # with open(FLAGS.params) as f:
+  #   params = json.load(f)
+  params = options()
   params['use_tpu'] = getval('use_tpu', True)
   params['batch_per_core'] = getval('batch_per_core', 1)
   params['iterations'] = getval('iterations', 20)
   params['batch_size'] = FLAGS.num_cores * params['batch_per_core']
-  params['n_ctx'] = getval('n_ctx', 1024)
-  params['n_embd'] = getval('n_embd', 768)
-  params['n_head'] = getval('n_head', 12)
-  params['n_layer'] = getval('n_layer', 12)
-  params['n_vocab'] = getval('n_vocab', 50257)
   params['opt_name'] = getval('opt_name', 'adam')
   params['beta1'] = getval('beta1', 0.9)
   params['beta2'] = getval('beta2', 0.999)
@@ -98,8 +114,9 @@ def main(unused_argv):
 
   graph = tf.Graph()
   with graph.as_default():
+    master = FLAGS.tpu or FLAGS.master or getval('TPU_NAME', 'unknown')
     cluster_resolver = tf.distribute.cluster_resolver.TPUClusterResolver(
-        FLAGS.tpu or FLAGS.master or getval('TPU_NAME', 'unknown'),
+        master,
         zone=FLAGS.tpu_zone,
         project=FLAGS.gcp_project)
     config = tf.ConfigProto(operation_timeout_in_ms=600 * 60 * 1000,
@@ -113,33 +130,42 @@ def main(unused_argv):
     if cluster_spec:
       config.cluster_def.CopyFrom(cluster_spec.as_cluster_def())
     sess = tf.InteractiveSession(cluster_resolver.get_master(), graph=graph, config=config)
-    import pdb; pdb.set_trace()
+    devices = sess.list_devices()
+    cores = sorted([x.name for x in devices if ':TPU:' in x.name])
+    num_cores = len(cores)
+    assert num_cores % 8 == 0
+    num_hosts = num_cores // 8
+    print(config.cluster_def)
+    print('cores: %d hosts: %d ip: %s' % (num_cores, num_hosts, master))
     tf.logging.info("TrainRunner: initializing TPU session...")
     if not bool(int(os.environ.get('TPU_NO_INIT', '0'))):
       tflex.run(sess, tf.tpu.initialize_system())
     tf.logging.info("TrainRunner: initializing TPU session (done)")
+    gan = BigGAN.GAN()
+    pp(tf.trainable_variables())
+    import pdb; pdb.set_trace()
     
 
-    seed = 0
-    dataset = ImageNet.make_dataset("gs://dota-euw4a/datasets/danbooru2019-s/danbooru2019-s-0*", 0, 1, seed=seed)
-    it = iterate_dataset(dataset)
+    # seed = 0
+    # dataset = ImageNet.make_dataset(FLAGS.dataset or "gs://dota-euw4a/datasets/danbooru2019-s/danbooru2019-s-0*", 0, 1, seed=seed)
+    # it = iterate_dataset(dataset)
 
-    def go():
-      zz = next(it)
-      images = [zz['image']]
-      labels = [zz['label']]
+    # def go():
+    #   zz = next(it)
+    #   images = [zz['image']]
+    #   labels = [zz['label']]
 
-      #import IPython
-      print('label', labels[0])
-      #print(labels[0] - 1, imagenet_label_names[labels[0] - 1])
-      print(images[0].shape)
-      print('embedding', zz['parsed']['image/class/embedding'].values.shape)
-      print('filename', zz['parsed']['image/filename'])
-      print('hash', zz['parsed']['image/hash'])
-      op = tf.io.encode_jpeg(images[0])
-      with open('test.png', 'wb') as f:
-        f.write(sess.run(op))
-    go()
+    #   #import IPython
+    #   print('label', labels[0])
+    #   #print(labels[0] - 1, imagenet_label_names[labels[0] - 1])
+    #   print(images[0].shape)
+    #   print('embedding', zz['parsed']['image/class/embedding'].values.shape)
+    #   print('filename', zz['parsed']['image/filename'])
+    #   print('hash', zz['parsed']['image/hash'])
+    #   op = tf.io.encode_jpeg(images[0])
+    #   with open('test.png', 'wb') as f:
+    #     f.write(sess.run(op))
+    # go()
 
     import pdb; pdb.set_trace()
 

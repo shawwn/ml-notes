@@ -261,12 +261,39 @@ flags.DEFINE_boolean(
 
 
 
+import tflex
+
+
+flags.DEFINE_multi_string(
+    "gin_config", [],
+    "List of paths to the config files.")
+
+flags.DEFINE_multi_string(
+    "gin_bindings", [],
+    "Newline separated list of Gin parameter bindings.")
+
+
 @gin.configurable
 def run_config(*,
     iterations_per_loop,
     save_checkpoints_steps,
+    train_steps=-1,
     **kwargs):
-  return dict(
+  return tflex.Dictator(
       iterations_per_loop=iterations_per_loop,
       save_checkpoints_steps=save_checkpoints_steps,
+      train_steps=train_steps,
+      **kwargs)
+
+
+@gin.configurable
+def options(*,
+    dataset,
+    batch_per_core,
+    use_tpu=True,
+    **kwargs):
+  return tflex.Dictator(
+      dataset=dataset,
+      batch_per_core=batch_per_core,
+      use_tpu=use_tpu,
       **kwargs)

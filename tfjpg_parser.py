@@ -120,8 +120,10 @@ class ImageNet(object):
 
     parsed = tf.parse_single_example(value, keys_to_features)
     parsed['image/hash'] = tf.raw_ops.Fingerprint(data=[parsed['image/encoded']], method='farmhash64')[0]
+    identifier = tf.abs(tf.bitcast(parsed['image/hash'], tf.int64))
     image_bytes = tf.reshape(parsed['image/encoded'], shape=[])
     image = tf.io.decode_image(image_bytes, 3)
+    image.set_shape(tf.TensorShape([None, None, 3]))
 
     # Subtract one so that labels are in [0, 1000).
     label = tf.cast(
@@ -135,6 +137,7 @@ class ImageNet(object):
         lambda: tf.one_hot(label, 1000))
 
     return {
+      'id': identifier,
       'image': image,
       'label': label,
       'embedding': embedding,
@@ -167,7 +170,13 @@ class ImageNet(object):
   @staticmethod
   def make_dataset(data_dirs, index, num_hosts,
                    seed=None, shuffle_filenames=False,
-                   num_parallel_calls = 64):
+                   num_parallel_calls = 64,
+                   filter_fn=None,
+                   parse_fn=None,
+                   batch_size=None,
+                   batch_shape=None,
+                   cache_image_data=False,
+                   cache_decoded_image=False):
 
     if shuffle_filenames:
       assert seed is not None
@@ -193,10 +202,50 @@ class ImageNet(object):
         tf.contrib.data.parallel_interleave(
             fetch_dataset, cycle_length=num_parallel_calls, sloppy=True))
 
+    def parser(dset):
+      dset = ImageNet.dataset_parser_static(dset)
+      if parse_fn is not None:
+        dset = parse_fn(dset)
+      return dset
+
     dataset = dataset.map(
         ImageNet.dataset_parser_static,
         num_parallel_calls=num_parallel_calls)
 
+    if filter_fn is not None:
+      dataset = dataset.filter(filter_fn)
+
+    if cache_image_data:
+      assert cache_decoded_image == False
+      dataset = dataset.cache()
+
+    if parse_fn is not None:
+      dataset = dataset.map(
+          parse_fn,
+          num_parallel_calls=num_parallel_calls)
+      if cache_decoded_image:
+        dataset = dataset.cache()
+
+    if batch_size is not None:
+      dataset = dataset.repeat()
+      dataset = dataset.batch(batch_size)
+      if batch_shape is not None:
+        def set_batch_size(arg):
+          if isinstance(arg, (tuple, list)):
+            for x in arg:
+              set_batch_size(x)
+          elif isinstance(arg, dict):
+            for k, v in arg.items():
+              set_batch_size(v)
+          elif isinstance(arg, tf.Tensor):
+            shape = arg.shape.as_list()
+            if len(shape) > 0 and shape[0] is None:
+              shape[0] = batch_shape
+              arg.set_shape(shape)
+          return arg
+        dataset = dataset.map(
+            set_batch_size,
+            num_parallel_calls=num_parallel_calls)
     return dataset
 
 

@@ -80,7 +80,7 @@ class TrainRunner(object):
 
   def __init__(self, iterations, train_steps=-1):
     tf.logging.info("TrainRunner: constructor")
-    self.feature_structure = {}
+    self.feature_structure = None
     self.loss = None
     self.infeed_queue = []
     self.enqueue_ops = []
@@ -112,11 +112,20 @@ class TrainRunner(object):
     cluster_spec = self.cluster_resolver.cluster_spec()
     if cluster_spec:
       self.config.cluster_def.CopyFrom(cluster_spec.as_cluster_def())
-    self.init_sess = tf.Session(self.cluster_resolver.get_master(), graph=self.init_graph, config=self.config)
+    self.master = self.cluster_resolver.get_master()
+    self.init_sess = tf.Session(self.master, graph=self.init_graph, config=self.config)
     tf.logging.info("TrainRunner: initializing TPU session...")
     if not bool(int(os.environ.get('TPU_NO_INIT', '0'))):
       tflex.run(self.init_sess, self.tpu_init)
     tf.logging.info("TrainRunner: initializing TPU session (done)")
+    self.devices = self.init_sess.list_devices()
+    self.cores = sorted([x.name for x in self.devices if ':TPU:' in x.name])
+    self.num_cores = len(self.cores)
+    self.tpu_cores_per_host = 8
+    assert self.num_cores % self.tpu_cores_per_host == 0
+    self.num_hosts = self.num_cores // self.tpu_cores_per_host
+    print(self.config.cluster_def)
+    print('cores: %d hosts: %d ip: %s' % (self.num_cores, self.num_hosts, self.master))
 
   def device_for_host(self, task=0, cpu=0):
     job_name = FLAGS.tpu_job_name or "worker" # "tpu_worker"
@@ -135,8 +144,13 @@ class TrainRunner(object):
     iparams = {}
     for k, v in params.items():
       iparams[k] = v
-    iparams["batch_size"] = params["batch_size"] // FLAGS.num_cores
-    iparams["dataset_num_shards"] = FLAGS.num_cores // FLAGS.tpu_cores_per_host
+    if "batch_per_core" in params:
+      iparams["batch_size"] = params["batch_per_core"] * self.num_cores // self.num_hosts
+    else:
+      assert params["batch_size"] % self.num_cores == 0
+      iparams["batch_size"] = params["batch_size"] // self.num_cores
+    self.train_batch_size = iparams["batch_size"] * self.num_cores
+    iparams["dataset_num_shards"] = self.num_hosts
 
     def get_enqueue_ops_fn():
       """Generate the enqueue ops graph function."""
@@ -154,9 +168,12 @@ class TrainRunner(object):
         with tf.device(self.device_for_host(task=host_id)):
           for _ in range(FLAGS.tpu_cores_per_host):
             with tf.control_dependencies(control_deps):
-              features, labels = iterator.get_next()
-            self.feature_structure["features"] = features
-            self.feature_structure["labels"] = labels
+              self.feature_structure = iterator.get_next()
+              if not isinstance(self.feature_structure, dict):
+                features, labels = self.feature_structure
+                self.feature_structure = {}
+                self.feature_structure["features"] = features
+                self.feature_structure["labels"] = labels
             flattened_inputs = data_nest.flatten(self.feature_structure)
             control_deps.extend(flattened_inputs)
             per_host_sharded_inputs.append(flattened_inputs)
@@ -197,12 +214,12 @@ class TrainRunner(object):
       tflex.run(self.input_sess, [self.enqueue_ops])
       tf.logging.info('infeed session.run finished')
 
-    for i in tqdm.trange(FLAGS.num_cores // FLAGS.tpu_cores_per_host):
+    for i in tqdm.trange(self.num_hosts):
       self.build_enqueue_ops(input_fn, params, i)
 
     # Build infeed sesssion
     self.input_sess = tf.Session(
-        self.cluster_resolver.get_master(),
+        self.master,
         graph=self.input_graph,
         config=self.config)
     self.input_sess.run(self.dataset_initializer)
@@ -218,8 +235,12 @@ class TrainRunner(object):
         values = self.infeed_queue[0].generate_dequeue_op(tpu_device=0)
         unflattened_inputs = data_nest.pack_sequence_as(self.feature_structure,
                                                         values)
-        features = unflattened_inputs["features"]
-        labels = unflattened_inputs["labels"]
+        if "features" in unflattened_inputs and "labels" in unflattened_inputs:
+          features = unflattened_inputs["features"]
+          labels = unflattened_inputs["labels"]
+        else:
+          features = unflattened_inputs
+          labels = None
         estimator_spec = model_fn(features, labels, tf.estimator.ModeKeys.TRAIN,
                                   mparams)
         return estimator_spec
@@ -243,7 +264,7 @@ class TrainRunner(object):
         params['use_tpu'] = False
         self.tpu_global_step = tflex.get_or_create_global_step()
         self.tpu_spec = tpu_pre(_INITIAL_LOSS)
-        self.tpu_sess = tf.Session(self.cluster_resolver.get_master(), config=self.config, graph=self.graph)
+        self.tpu_sess = tf.Session(self.master, config=self.config, graph=self.graph)
         import pdb; pdb.set_trace()
         self.tpu_op = tpu_make(self.tpu_spec)
         params['use_tpu'] = True
@@ -256,7 +277,7 @@ class TrainRunner(object):
     (self.loss,) = tpu.shard(
         tpu_loop,
         inputs=[],
-        num_shards=FLAGS.num_cores,
+        num_shards=self.num_cores,
         outputs_from_all_shards=False,
     )
     initializer = tf.global_variables_initializer()
@@ -269,7 +290,7 @@ class TrainRunner(object):
                          FLAGS.model_dir, "graph.pbtxt")
 
     # Build tpu train model session and initialize graph
-    self.sess = tf.Session(self.cluster_resolver.get_master(), config=self.config)
+    self.sess = tf.Session(self.master, config=self.config)
     tflex.run(self.sess, initializer)
 
     if FLAGS.restore_dir is not None:
@@ -360,7 +381,7 @@ class TrainRunner(object):
       gs = tflex.run(self.sess, self.global_step)
       step_sec = end - start
       gs_sec = self.iterations / step_sec
-      ex_sec = self.iterations * FLAGS.train_batch_size / (end - start)
+      ex_sec = self.iterations * self.train_batch_size / (end - start)
       # Write out summary to tensorboard.
       if output_summaries:
         tf.logging.info("TrainRunner: writing summaries...")
@@ -371,8 +392,8 @@ class TrainRunner(object):
               'seconds_per_step': step_sec,
               'global_step_per_second': gs_sec,
               'examples_per_second': ex_sec,
-              'train_batch_size_per_core': FLAGS.train_batch_size // FLAGS.num_cores,
-              'num_cores': FLAGS.num_cores,
+              'train_batch_size_per_core': self.train_batch_size // self.num_cores,
+              'num_cores': self.num_cores,
               }
           for metric in eval_results:
             values = eval_results[metric]
@@ -418,4 +439,22 @@ class TrainRunner(object):
     if not bool(int(os.environ.get('TPU_NO_INIT', '0'))):
       tflex.run(self.init_sess, self.tpu_shutdown)
       tf.logging.info("TrainRunner: shutting down (done)")
+
+
+def get_input_info(params):
+  # TODO(dehao): Replace the following with params['context'].current_host
+  if 'context' in params:
+    current_host = params['context'].current_input_fn_deployment()[1]
+    num_hosts = params['context'].num_hosts
+  else:
+    if 'dataset_index' in params:
+      current_host = params['dataset_index']
+      num_hosts = params['dataset_num_shards']
+    else:
+      current_host = 0
+      num_hosts = 1
+  return tflex.Dictator(
+      num_hosts=num_hosts,
+      current_host=current_host,
+      )
 

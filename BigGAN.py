@@ -285,10 +285,13 @@ class GBlock(nn.Module):
 
 
 class Generator256(nn.Module):
-  def __init__(self, code_dim=140, n_class=1000, chn=96, debug=False, scope='Generator', **kwargs):
+  def __init__(self, dim_z=140, n_class=1000, chn=96, debug=False, scope='Generator', **kwargs):
     super().__init__(scope=scope, **kwargs)
     self.linear = nn.Linear(n_class, 128, bias=False)
     with self.scope():
+      self.dim_z = dim_z
+      self.n_class = n_class
+      self.chn = chn
 
       if debug:
         chn = 8
@@ -342,6 +345,8 @@ class Discriminator256(nn.Module):
     super().__init__(scope=scope, **kwargs)
 
     with self.scope():
+      self.n_class = n_class
+      self.chn = chn
 
       def conv(in_channel, out_channel, downsample=True, **kwargs):
         return GBlock(in_channel, out_channel, bn=False, upsample=False, downsample=downsample, **kwargs)
@@ -398,10 +403,13 @@ class Discriminator256(nn.Module):
 
 
 class Generator512(nn.Module):
-  def __init__(self, code_dim=128, n_class=1000, chn=96, debug=False, scope='Generator', **kwargs):
+  def __init__(self, dim_z=128, n_class=1000, chn=96, debug=False, scope='Generator', **kwargs):
     super().__init__(scope=scope, **kwargs)
     self.linear = nn.Linear(n_class, 128, bias=False)
     with self.scope():
+      self.dim_z = dim_z
+      self.n_class = n_class
+      self.chn = chn
 
       if debug:
         chn = 8
@@ -411,7 +419,7 @@ class Generator512(nn.Module):
       with self.scope('G_Z'):
         self.G_linear = SpectralNorm(nn.Linear(16, 4 * 4 * 16 * chn, scope="G_linear"))
 
-      z_dim = code_dim + 16
+      z_dim = dim_z + 16
 
       self.GBlock = []
       self.GBlock += [GBlock(16 * chn, 16 * chn, n_class=n_class, z_dim=z_dim, index=0)]
@@ -459,6 +467,8 @@ class Discriminator512(nn.Module):
     super().__init__(scope=scope, **kwargs)
 
     with self.scope():
+      self.n_class = n_class
+      self.chn = chn
 
       def conv(in_channel, out_channel, downsample=True, **kwargs):
         return GBlock(in_channel, out_channel, bn=False, upsample=False, downsample=downsample, **kwargs)
@@ -648,6 +658,11 @@ class DeepGenerator512(nn.Module):
     self.shared_dim = shared_dim if shared_dim > 0 else dim_z
     self.linear = nn.Linear(n_class, 128, bias=False)
     with self.scope():
+      self.dim_z = dim_z
+      self.n_class = n_class
+      self.chn = chn
+      self.hier = hier
+      self.shared_dim = shared_dim
 
       if debug:
         chn = 8
@@ -1342,11 +1357,13 @@ class SpectralNorm(nn.Module):
     # if return_norm:
     #   return w_normalized, norm
     # return w_normalized
+    delattr(self.module, self.name)
     setattr(self.module, self.name, w_normalized)
 
   def forward(self, *args):
     #import pdb; pdb.set_trace()
-    self._update()
+    with self.module.scope():
+      self._update()
     return self.module.forward(*args)
   
 
