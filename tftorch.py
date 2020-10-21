@@ -818,7 +818,7 @@ class Module(object):
             else:
                 buffers = self.__dict__.get('_buffers')
                 if buffers is not None and name in buffers:
-                    if value is not None and not isinstance(value, torch.Tensor):
+                    if value is not None and not isinstance(value, Tensor):
                         raise TypeError("cannot assign '{}' as buffer '{}' "
                                         "(torch.Tensor or None expected)"
                                         .format(torch_typename(value), name))
