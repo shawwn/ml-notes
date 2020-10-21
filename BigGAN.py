@@ -247,6 +247,21 @@ class GBlock(nn.Module):
       self.downsample = downsample
       self.activation = activation
       self.bn = bn
+      self.z_dim = z_dim
+
+  def extra_repr(self):
+    return 'z_dim={z_dim}, bn={bn}, upsample={upsample}, downsample={downsample}' \
+         ''.format(**self.__dict__)
+
+  def extra_repr(self):
+    s = ('z_dim={z_dim}, bn={bn}')
+    if self.upsample:
+      s += ', upsample={upsample}'
+    if self.downsample:
+      s += ', downsample={upsample}'
+    s += ', activation={activation}'
+    return s.format(**self.__dict__)
+
 
   def forward(self, input, condition=None):
     with self.scope():
