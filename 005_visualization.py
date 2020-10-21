@@ -727,9 +727,11 @@ r([tf.global_variables_initializer(), tf.local_variables_initializer()])
 
 
 
+graph.__dict__.update(tf.Graph().__dict__)
 
 # Sample random noise (z) and ImageNet label (y) inputs.
 deep = False
+deep = True
 res = 512
 batch_size = 1
 truncation = 0.5  # scalar truncation value in [0.02, 1.0]
@@ -762,6 +764,8 @@ op_final = len(graph.get_operations())
 
 
 #import tftorch as nn; reload(nn); import BigGAN; reload(BigGAN); mdl = BigGAN.BigGAN256(scope='').eval(); op_offset = len(graph.get_operations()); samples = mdl.generator(z, y); op_final = len(graph.get_operations()); samples
+
+# import tftorch as nn; reload(nn); import BigGAN; reload(BigGAN); mdl = BigGAN.BigGAN512(scope='', disc=True).eval(); op_offset = len(graph.get_operations()); samples_plain = mdl.generator(z, y); samples = mdl.ema_generator(z, y); op_final = len(graph.get_operations()); logits = mdl.discriminator(samples, y); mdl_train = BigGAN.BigGAN512(scope='', disc=True).train(); samples_train = mdl_train.generator(z, y); samples_train_ema = mdl_train.ema_generator(z, y)
 
 # BigGAN-256
 assert deep == False
@@ -835,9 +839,12 @@ def fimg2png(img):
   return tf.image.encode_png(f32rgb_to_u8((img + 1) / 2))
 
 
-def datdisk(data, filename='bgd512_0.png' if deep else 'bg{res}_0.png'.format(res=res)):
+def datdisk(data, filename=None):
+  if filename is None:
+    filename = 'bgd512_0.png' if deep else 'bg{res}_0.png'.format(res=res)
   with open(filename, 'wb') as f:
     f.write(data)
+  return filename
 
 
 # RGB = tf.placeholder(tf.float32, [256, 256, 3], name="RGB")
