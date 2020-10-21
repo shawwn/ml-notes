@@ -1,3 +1,4 @@
+import gin
 from absl import flags
 
 FLAGS = flags.FLAGS
@@ -259,3 +260,13 @@ flags.DEFINE_boolean(
     help=('When set to true traces collected from worker-0 on every run'))
 
 
+
+@gin.configurable
+def run_config(*,
+    iterations_per_loop,
+    save_checkpoints_steps,
+    **kwargs):
+  return dict(
+      iterations_per_loop=iterations_per_loop,
+      save_checkpoints_steps=save_checkpoints_steps,
+      **kwargs)
