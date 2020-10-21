@@ -189,12 +189,12 @@ class ParameterMeta(type):
     return cls(*args, **kwargs)
   def __instancecheck__(cls, instance):
     if isinstance(instance, variables.Variable):
-      print('ParameterMeta.__instancecheck__', cls, instance)
+      #print('ParameterMeta.__instancecheck__', cls, instance)
       return True
     return super().__instancecheck__(instance)
   def __subclasscheck__(cls, subclass):
     if issubclass(subclass, variables.Variable):
-      print('ParameterMeta.__subclasscheck__', cls, subclass)
+      #print('ParameterMeta.__subclasscheck__', cls, subclass)
       return True
     return super().__subclasscheck__(subclass)
 
@@ -225,12 +225,12 @@ class TensorMeta(type):
     return cls(*args, **kwargs)
   def __instancecheck__(cls, instance):
     if isinstance(instance, tensor_like._TensorLike):
-      print('TensorMeta.__instancecheck__', cls, instance)
+      #print('TensorMeta.__instancecheck__', cls, instance)
       return True
     return super().__instancecheck__(instance)
   def __subclasscheck__(cls, subclass):
     if issubclass(subclass, tensor_like._TensorLike):
-      print('TensorMeta.__subclasscheck__', cls, subclass)
+      #print('TensorMeta.__subclasscheck__', cls, subclass)
       return True
     return super().__subclasscheck__(subclass)
 
