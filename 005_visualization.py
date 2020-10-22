@@ -723,6 +723,7 @@ import tensorflow_hub as hub
 mod = hub.Module("gs://dota-euw4a/models/biggan-256")
 
 r([tf.global_variables_initializer(), tf.local_variables_initializer()])
+pp(tf.get_collection('tftorch_initializers'))
 
 
 
@@ -731,8 +732,9 @@ graph.__dict__.update(tf.Graph().__dict__)
 
 # Sample random noise (z) and ImageNet label (y) inputs.
 deep = False
-deep = True
-res = 512
+#deep = True
+#res = 512
+res = 256
 batch_size = 1
 truncation = 0.5  # scalar truncation value in [0.02, 1.0]
 z_dim = 128 if deep else 140 if res == 256 else 128
@@ -795,8 +797,8 @@ with open('my-sample-ops.txt', 'w') as f: [f.write(pf(op)+'\n') for op in sample
 
 pp(tf.all_variables())
 
-g_vars = [x for x in tf.all_variables() if 'Discriminator' not in x.name and 'module/' not in x.name]
-d_vars = [x for x in tf.all_variables() if 'Discriminator' in x.name and 'module/' not in x.name]
+g_vars = [x for x in tf.all_variables() if 'Discriminator' not in x.name and 'module/' not in x.name and 'Adam' not in x.name and x.name.split(':')[0] not in ["beta1_power", "beta2_power", "global_step"]]
+d_vars = [x for x in tf.all_variables() if 'Discriminator' in x.name and 'module/' not in x.name and 'Adam' not in x.name and x.name.split(':')[0] not in ["beta1_power", "beta2_power", "global_step"]]
 ckpt = 'gs://tpu-usc1/models/biggan-deep-512/variables' if deep else 'gs://tpu-usc1/models/biggan-{res}/variables'.format(res=res)
 saver = tf.train.Saver(var_list=g_vars); saver.restore(sess, tf.train.latest_checkpoint(ckpt));
 
@@ -857,6 +859,7 @@ def datdisk(data, filename=None):
 
 
 pngs = fimg2png(samples[0])
+sample = r(samples[0], {z: truncated_z_sample(batch_size, z_dim, truncation=0.5, seed=638), y: one_hot([598], n_class)});
 
 datdisk(r(pngs, {z: truncated_z_sample(batch_size, z_dim, truncation=0.5, seed=638), y: one_hot([598], n_class)}));
 
