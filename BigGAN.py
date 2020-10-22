@@ -182,6 +182,7 @@ class ConditionalBatchNorm2d(nn.Module):
     super().__init__(scope=scope, **kwargs)
     with self.scope():
       self.num_features = num_features
+      self.num_classes = num_classes
       self.gamma_embed = SpectralNorm(nn.Linear(num_classes, num_features, bias=False, scope=gamma_scope))
       self.beta_embed = SpectralNorm(nn.Linear(num_classes, num_features, bias=False, scope=beta_scope))
     self.bn = nn.BatchNorm2d(num_features, affine=False, eps=eps, momentum=momentum, scope=bn_scope, **kwargs)
