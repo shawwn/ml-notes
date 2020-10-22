@@ -375,9 +375,9 @@ class Discriminator256(nn.Module):
       with self.scope('pre_conv'):
         self.pre_conv = nn.Sequential(
           SpectralNorm(nn.Conv2d(3, 1 * chn, 3, padding=1, index=0)),
-          nn.ReLU(index=1),
-          SpectralNorm(nn.Conv2d(1 * chn, 1 * chn, 3, padding=1, index=2)),
-          nn.AvgPool2d(2, index=3),
+          nn.ReLU(),
+          SpectralNorm(nn.Conv2d(1 * chn, 1 * chn, 3, padding=1, index=1)),
+          nn.AvgPool2d(2),
         )
       self.pre_skip = SpectralNorm(nn.Conv2d(3, 1 * chn, 1, scope='pre_skip'))
 
@@ -498,9 +498,9 @@ class Discriminator512(nn.Module):
       with self.scope('pre_conv'):
         self.pre_conv = nn.Sequential(
           SpectralNorm(nn.Conv2d(3, 1 * chn, 3, padding=1, index=0)),
-          nn.ReLU(index=1),
-          SpectralNorm(nn.Conv2d(1 * chn, 1 * chn, 3, padding=1, index=2)),
-          nn.AvgPool2d(2, index=3),
+          nn.ReLU(),
+          SpectralNorm(nn.Conv2d(1 * chn, 1 * chn, 3, padding=1, index=1)),
+          nn.AvgPool2d(2),
         )
       self.pre_skip = SpectralNorm(nn.Conv2d(3, 1 * chn, 1, scope='pre_skip'))
 
