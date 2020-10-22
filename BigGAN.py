@@ -544,39 +544,45 @@ class Discriminator512(nn.Module):
 
 
 
-@gin.configurable(whitelist=[])
+@gin.configurable(whitelist=['use_ema'])
 class BigGAN256(nn.Module):
-  def __init__(self, scope='', disc=False, **kwargs):
+  def __init__(self, scope='', disc=False, use_ema=True, **kwargs):
     super().__init__(scope=scope, **kwargs)
     with self.scope():
       self.discriminator = Discriminator256() if disc else None
       self.generator = Generator256()
-      def ema_getter(getter, name, *args, trainable=True, **kwargs):
-        v = name.split('/')[-1]
-        if v in ['w', 'b', 'beta', 'gamma']:
-          name = name + '/ema_b999900'
-        var = getter(name, *args, **kwargs, trainable=False)
-        return var
-      with tf.variable_scope("", reuse=True, custom_getter=ema_getter):
-        self.ema_generator = Generator256()
+      if not use_ema:
+        self.ema_generator = self.generator
+      else:
+        def ema_getter(getter, name, *args, trainable=True, **kwargs):
+          v = name.split('/')[-1]
+          if v in ['w', 'b', 'beta', 'gamma']:
+            name = name + '/ema_b999900'
+          var = getter(name, *args, **kwargs, trainable=False)
+          return var
+        with tf.variable_scope("", reuse=True, custom_getter=ema_getter):
+          self.ema_generator = Generator256()
       
 
 
-@gin.configurable(whitelist=[])
+@gin.configurable(whitelist=['use_ema'])
 class BigGAN512(nn.Module):
-  def __init__(self, scope='', disc=False, **kwargs):
+  def __init__(self, scope='', disc=False, use_ema=True, **kwargs):
     super().__init__(scope=scope, **kwargs)
     with self.scope():
       self.discriminator = Discriminator512() if disc else None
       self.generator = Generator512()
-      def ema_getter(getter, name, *args, trainable=True, **kwargs):
-        v = name.split('/')[-1]
-        if v in ['w', 'b', 'beta', 'gamma']:
-          name = name + '/ema_b999900'
-        var = getter(name, *args, **kwargs, trainable=False)
-        return var
-      with tf.variable_scope("", reuse=True, custom_getter=ema_getter):
-        self.ema_generator = Generator512()
+      if not use_ema:
+        self.ema_generator = self.generator
+      else:
+        def ema_getter(getter, name, *args, trainable=True, **kwargs):
+          v = name.split('/')[-1]
+          if v in ['w', 'b', 'beta', 'gamma']:
+            name = name + '/ema_b999900'
+          var = getter(name, *args, **kwargs, trainable=False)
+          return var
+        with tf.variable_scope("", reuse=True, custom_getter=ema_getter):
+          self.ema_generator = Generator512()
 
 
 
@@ -750,14 +756,16 @@ class DeepGenerator512(nn.Module):
 
 
 
-@gin.configurable(whitelist=[])
+@gin.configurable(whitelist=['use_ema'])
 class BigGANDeep512(nn.Module):
-  def __init__(self, scope='', disc=False, ema=True, **kwargs):
+  def __init__(self, scope='', disc=False, use_ema=True, **kwargs):
     super().__init__(scope=scope, **kwargs)
     with self.scope():
       self.discriminator = DeepDiscriminator512() if disc else None
       self.generator = DeepGenerator512()
-      if ema:
+      if not use_ema:
+        self.ema_generator = self.generator
+      else:
         def ema_getter(getter, name, *args, trainable=True, **kwargs):
           v = name.split('/')[-1]
           if v in ['w', 'b', 'scale', 'offset', 'gamma']:
@@ -766,8 +774,6 @@ class BigGANDeep512(nn.Module):
           return var
         with tf.variable_scope("", reuse=True, custom_getter=ema_getter):
           self.ema_generator = DeepGenerator512()
-      else:
-        self.ema_generator = self.generator
 
 
 
