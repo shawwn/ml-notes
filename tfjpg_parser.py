@@ -19,6 +19,7 @@ from __future__ import print_function
 
 from absl import flags
 import tensorflow as tf
+import tputil
 
 IMAGE_SIZE = 512
 CROP_PADDING = 32
@@ -168,52 +169,54 @@ class ImageNet(object):
     return 8 * ImageNet.get_num_hosts(params)
 
   @staticmethod
-  def make_dataset(data_dirs, index, num_hosts,
+  def make_dataset(file_patterns, index, num_hosts,
                    seed=None, shuffle_filenames=False,
                    num_parallel_calls = 64,
                    filter_fn=None,
                    parse_fn=None,
                    batch_size=None,
-                   batch_shape=None,
                    cache_image_data=False,
                    cache_decoded_image=False):
 
     if shuffle_filenames:
       assert seed is not None
 
-    file_patterns = [x.strip() for x in data_dirs.split(',') if len(x.strip()) > 0]
-
     # For multi-host training, we want each hosts to always process the same
     # subset of files.  Each host only sees a subset of the entire dataset,
     # allowing us to cache larger datasets in memory.
-    dataset = None
-    for pattern in file_patterns:
-      x = tf.data.Dataset.list_files(pattern, shuffle=shuffle_filenames, seed=seed)
-      dataset = x if dataset is None else dataset.concatenate(x)
-    dataset = dataset.shard(num_hosts, index)
+    if False:
+      file_patterns = [x.strip() for x in file_patterns.split(',') if len(x.strip()) > 0]
+      dataset = None
+      for pattern in file_patterns:
+        x = tf.data.Dataset.list_files(pattern, shuffle=shuffle_filenames, seed=seed)
+        dataset = x if dataset is None else dataset.concatenate(x)
+      dataset = dataset.shard(num_hosts, index)
 
-    def fetch_dataset(filename):
-      buffer_size = 8 * 1024 * 1024  # 8 MiB per file
-      dataset = tf.data.TFRecordDataset(filename, buffer_size=buffer_size)
-      return dataset
+      def fetch_dataset(filename):
+        buffer_size = 8 * 1024 * 1024  # 8 MiB per file
+        dataset = tf.data.TFRecordDataset(filename, buffer_size=buffer_size)
+        return dataset
 
-    # Read the data from disk in parallel
-    dataset = dataset.apply(
-        tf.contrib.data.parallel_interleave(
-            fetch_dataset, cycle_length=num_parallel_calls, sloppy=True))
-
-    def parser(dset):
-      dset = ImageNet.dataset_parser_static(dset)
-      if parse_fn is not None:
-        dset = parse_fn(dset)
-      return dset
+      # Read the data from disk in parallel
+      dataset = dataset.apply(
+          tf.contrib.data.parallel_interleave(
+              fetch_dataset, cycle_length=num_parallel_calls, sloppy=True))
+    else:
+      # filenames = []
+      # for pattern in file_patterns:
+      #   files = tf.io.gfile.glob(pattern)
+      #   if len(files) <= 0:
+      #     raise ValueError("Pattern matched no files: {}".format(pattern))
+      #   filenames.append(files)
+      dataset = tputil.tf_sharded_datasets(file_patterns, num_hosts=num_hosts, current_host=index)
 
     dataset = dataset.map(
         ImageNet.dataset_parser_static,
         num_parallel_calls=num_parallel_calls)
 
     if filter_fn is not None:
-      dataset = dataset.filter(filter_fn)
+      raise NotImplementedError()
+      #dataset = dataset.filter(filter_fn)
 
     if cache_image_data:
       assert cache_decoded_image == False
@@ -229,23 +232,22 @@ class ImageNet(object):
     if batch_size is not None:
       dataset = dataset.repeat()
       dataset = dataset.batch(batch_size)
-      if batch_shape is not None:
-        def set_batch_size(arg):
-          if isinstance(arg, (tuple, list)):
-            for x in arg:
-              set_batch_size(x)
-          elif isinstance(arg, dict):
-            for k, v in arg.items():
-              set_batch_size(v)
-          elif isinstance(arg, tf.Tensor):
-            shape = arg.shape.as_list()
-            if len(shape) > 0 and shape[0] is None:
-              shape[0] = batch_shape
-              arg.set_shape(shape)
-          return arg
-        dataset = dataset.map(
-            set_batch_size,
-            num_parallel_calls=num_parallel_calls)
+      def set_batch_size(arg):
+        if isinstance(arg, (tuple, list)):
+          for x in arg:
+            set_batch_size(x)
+        elif isinstance(arg, dict):
+          for k, v in arg.items():
+            set_batch_size(v)
+        elif isinstance(arg, tf.Tensor):
+          shape = arg.shape.as_list()
+          if len(shape) > 0 and shape[0] is None:
+            shape[0] = batch_size
+            arg.set_shape(shape)
+        return arg
+      dataset = dataset.map(
+          set_batch_size,
+          num_parallel_calls=num_parallel_calls)
     return dataset
 
 

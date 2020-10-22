@@ -790,12 +790,6 @@ class SpectralNorm(nn.Module):
     self.epsilon = epsilon
     self._make_params()
 
-  def should_update(self):
-    if self.training:
-      return True
-    return False
-
-
   def _make_params(self):
     if hasattr(self, 'w'):
       w = self.w
@@ -1350,7 +1344,7 @@ class SpectralNorm(nn.Module):
     #     <tf.Tensor 'module/Generator/G_Z/G_linear/u0:0' shape=() dtype=resource>,
     #     <tf.Tensor 'module/Generator_1/G_Z/G_linear/StopGradient:0' shape=(1, 24576) dtype=float32>,
     #     {'outputs': []}],
-    x88 = u0.assign(x66, read_value=False) if self.should_update() else x66
+    x88 = self.maybe_update('spectralnorm_u0', lambda: u0.assign(x66, read_value=False), lambda: x66)
     # ['ReadVariableOp', <tf.Operation 'module/Generator_1/G_Z/G_linear/ReadVariableOp_3' type=ReadVariableOp>,
     #     <tf.Tensor 'module/Generator/G_Z/G_linear/u0:0' shape=() dtype=resource>,
     #     {'outputs': [<tf.Tensor 'module/Generator_1/G_Z/G_linear/ReadVariableOp_3:0' shape=(1, 24576) dtype=float32>]}],
@@ -1360,7 +1354,7 @@ class SpectralNorm(nn.Module):
     #     <tf.Tensor 'module/Generator/G_Z/G_linear/u1:0' shape=() dtype=resource>,
     #     <tf.Tensor 'module/Generator_1/G_Z/G_linear/mul_5:0' shape=(1, 24576) dtype=float32>,
     #     {'outputs': []}],
-    x90 = u1.assign(x33, read_value=False) if self.should_update() else x33
+    x90 = self.maybe_update('spectralnorm_u1', lambda: u1.assign(x33, read_value=False), lambda: x33)
     # ['ReadVariableOp', <tf.Operation 'module/Generator_1/G_Z/G_linear/ReadVariableOp_4' type=ReadVariableOp>,
     #     <tf.Tensor 'module/Generator/G_Z/G_linear/u1:0' shape=() dtype=resource>,
     #     {'outputs': [<tf.Tensor 'module/Generator_1/G_Z/G_linear/ReadVariableOp_4:0' shape=(1, 24576) dtype=float32>]}],
@@ -1370,7 +1364,7 @@ class SpectralNorm(nn.Module):
     #     <tf.Tensor 'module/Generator/G_Z/G_linear/u2:0' shape=() dtype=resource>,
     #     <tf.Tensor 'module/Generator_1/G_Z/G_linear/mul_11:0' shape=(1, 24576) dtype=float32>,
     #     {'outputs': []}],
-    x92 = u2.assign(x65, read_value=False) if self.should_update() else x65
+    x92 = self.maybe_update('spectralnorm_u2', lambda: u2.assign(x65, read_value=False), lambda: x65)
     # ['ReadVariableOp', <tf.Operation 'module/Generator_1/G_Z/G_linear/ReadVariableOp_5' type=ReadVariableOp>,
     #     <tf.Tensor 'module/Generator/G_Z/G_linear/u2:0' shape=() dtype=resource>,
     #     {'outputs': [<tf.Tensor 'module/Generator_1/G_Z/G_linear/ReadVariableOp_5:0' shape=(1, 24576) dtype=float32>]}],

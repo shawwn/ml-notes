@@ -34,6 +34,8 @@ from tensorflow.core.protobuf import rewriter_config_pb2
 from tensorflow.python.data.util import nest as data_nest
 from tensorflow.python.framework import graph_io
 
+import train_flags
+
 FLAGS = flags.FLAGS
 
 _INITIAL_LOSS = 1e7
@@ -149,7 +151,7 @@ class TrainRunner(object):
     else:
       assert params["batch_size"] % self.num_cores == 0
       iparams["batch_size"] = params["batch_size"] // self.num_cores
-    self.train_batch_size = iparams["batch_size"] * self.num_cores
+    self.train_batch_size = iparams["batch_size"] * self.num_hosts
     iparams["dataset_num_shards"] = self.num_hosts
 
     def get_enqueue_ops_fn():
@@ -280,18 +282,23 @@ class TrainRunner(object):
         num_shards=self.num_cores,
         outputs_from_all_shards=False,
     )
-    initializer = tf.global_variables_initializer()
     if FLAGS.restore_trainable_variables:
       self.var_list = tf.trainable_variables()
     else:
       self.var_list = tf.global_variables()
-    self.saver = tf.train.Saver(var_list=self.var_list, keep_checkpoint_every_n_hours=0.5)
-    graph_io.write_graph(tf.Graph().as_graph_def(add_shapes=True),
-                         FLAGS.model_dir, "graph.pbtxt")
+    self.model_dir = FLAGS.model_dir or train_flags.options().get('model_dir')
+    self.saver = None
+    if self.model_dir is not None:
+      self.saver = tf.train.Saver(var_list=self.var_list, keep_checkpoint_every_n_hours=0.5)
+      # Why do this?
+      # graph_io.write_graph(tf.Graph().as_graph_def(add_shapes=True), self.model_dir, "graph.pbtxt")
 
     # Build tpu train model session and initialize graph
     self.sess = tf.Session(self.master, config=self.config)
-    tflex.run(self.sess, initializer)
+    self.initializer = [tf.local_variables_initializer(), tf.global_variables_initializer()]
+    self.extra_initializers = tf.get_collection('tftorch_initializers') # a bit of a hack, but it gets the job done
+    tflex.run(self.sess, self.initializer)
+    tflex.run(self.sess, self.extra_initializers)
 
     if FLAGS.restore_dir is not None:
       ckpt = tf.train.latest_checkpoint(FLAGS.restore_dir)
@@ -324,15 +331,24 @@ class TrainRunner(object):
       num_threads: number of outstanding checkpointing threads
 
     """
-    if output_summaries:
-      output_dir = os.path.join(FLAGS.model_dir, "eval")
+    if output_summaries and self.model_dir is not None:
+      output_dir = os.path.join(self.model_dir, "eval")
       tf.gfile.MakeDirs(output_dir)
       # Summary writer writes out eval metrics.
       summary_writer = tf.compat.v1.summary.FileWriter(output_dir)
+    else:
+      summary_writer = None
 
-    def checkpoint_thread_fn(saver, sess):
+    def checkpoint_thread_fn(saver, sess, force=False):
       step = self.cur_step
-      path = FLAGS.model_dir + "/model.ckpt"
+      if self.model_dir is None:
+        tf.logging.info('step %d: model_dir is None; not saving checkpoint %s-%d', step, 'model.ckpt', step)
+        return
+      if not force:
+        if train_flags.options().get('no_save'):
+          tf.logging.info('step %d: options.no_save is set; not saving checkpoint %s-%d', step, 'model.ckpt', step)
+          return
+      path = self.model_dir + "/model.ckpt"
       tf.logging.info('step %d: Saving checkpoint %s-%d...', step, path, step)
       now = time.time()
       saver.save(sess, path, write_meta_graph=False, global_step=step)
@@ -341,7 +357,7 @@ class TrainRunner(object):
 
     @tflex.register_command
     def save():
-      checkpoint_thread_fn(self.saver, self.sess)
+      checkpoint_thread_fn(self.saver, self.sess, force=True)
 
     thread_id = 0
     checkpoint_threads = []
@@ -405,10 +421,12 @@ class TrainRunner(object):
               summaries = []
               summaries.append(tf.Summary.Value(tag=tag, simple_value=value))
               tf_summary = tf.Summary(value=list(summaries))
-              summary_writer.add_summary(tf_summary, step)
+              if summary_writer is not None:
+                summary_writer.add_summary(tf_summary, step)
           tf.logging.info("TrainRunner: flushing summaries (%d)...", self.cur_step)
           def thunk(cur_step):
-            summary_writer.flush()
+            if summary_writer is not None:
+              summary_writer.flush()
             tf.logging.info("TrainRunner: flushing summaries (%d) (done)", cur_step)
           tflex.parallelize([self.cur_step], thunk)
       tf.logging.info(
@@ -431,7 +449,8 @@ class TrainRunner(object):
     tf.logging.info("TrainRunner: waiting for checkpoint threads (done)")
     if output_summaries:
       tf.logging.info("TrainRunner: closing summary writer...")
-      summary_writer.close()
+      if summary_writer is not None:
+        summary_writer.close()
       tf.logging.info("TrainRunner: closing summary writer (done)")
 
   def shutdown(self):

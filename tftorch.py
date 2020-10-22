@@ -31,6 +31,15 @@ import re
 T = TypeVar('T', bound='Module')
 
 
+def calling(op, nresults=1):
+  if callable(op):
+    op = op()
+  if not isinstance(op, (tuple, list)):
+    op = [op]
+  if nresults is not None:
+    assert len(op) == nresults
+  return op
+
 
 def absolute_variable_scope(scope=None, reuse=None, **kwargs):
     if scope is None:
@@ -183,8 +192,11 @@ class ParameterMeta(type):
       trainable = kwargs.pop('trainable', True)
       (value,) = args
       with absolute_variable_scope(reuse=tf.AUTO_REUSE):
+        initial_value = value
+        if callable(value):
+          value = value()
         v = globalvar(name, shape=size(value), dtype=value.dtype, trainable=trainable)
-      init_(v, value)
+        init_(v, initial_value)
       return v
     return cls(*args, **kwargs)
   def __instancecheck__(cls, instance):
@@ -347,6 +359,7 @@ class Module(object):
         self._index = index
         self._index_prefix = index_prefix
         self._index_bias = index_bias
+        self._updates = OrderedDict()
         self._parameters = OrderedDict()
         self._buffers = OrderedDict()
         self._non_persistent_buffers_set = set()
@@ -401,8 +414,11 @@ class Module(object):
       if value is None:
         setattr(self, name, value)
       else:
+        initial_value = value
+        if callable(value):
+          value = value()
         v = self.globalvar(name, shape=value.shape, dtype=value.dtype)
-        init_(v, value)
+        init_(v, initial_value)
         setattr(self, name, v)
       return getattr(self, name)
 
@@ -411,8 +427,11 @@ class Module(object):
       if value is None:
         setattr(self, name, value)
       else:
+        initial_value = value
+        if callable(value):
+          value = value()
         v = self.localvar(name, shape=value.shape, dtype=value.dtype, collections=['variables'])
-        init_(v, value)
+        init_(v, initial_value)
         setattr(self, name, v)
       return getattr(self, name)
 
@@ -445,6 +464,11 @@ class Module(object):
         # if persistent is False and isinstance(self, torch.jit.ScriptModule):
         #     raise RuntimeError("ScriptModule does not support non-persistent buffers")
 
+        # TKTK: Try to support values created via lambda
+        initial_value = tensor
+        if callable(tensor):
+          tensor = tensor()
+
         if '_buffers' not in self.__dict__:
             raise AttributeError(
                 "cannot assign buffer before Module.__init__() call")
@@ -458,13 +482,12 @@ class Module(object):
         elif hasattr(self, name) and name not in self._buffers:
             raise KeyError("attribute '{}' already exists".format(name))
         elif tensor is not None and not isinstance(tensor, Tensor):
-            # import pdb; pdb.set_trace()
             raise TypeError("cannot assign '{}' object to buffer '{}' "
                             "(torch Tensor or None required)"
                             .format(torch_typename(tensor), name))
         else:
             if not isinstance(tensor, Parameter):
-                tensor = Parameter(tensor, trainable=False, name=name)
+                tensor = Parameter(initial_value, trainable=False, name=name)
             self._buffers[name] = tensor
             if persistent:
                 self._non_persistent_buffers_set.discard(name)
@@ -537,6 +560,35 @@ class Module(object):
             raise KeyError("module name can't be empty string \"\"")
         self._modules[name] = module
 
+    def register_update(self, name: str, ops) -> None:
+        if not isinstance(name, six.string_types):
+            raise TypeError("update name should be a string. Got {}".format(
+                torch_typename(name)))
+        elif hasattr(self, name) and name not in self._updates:
+            raise KeyError("attribute '{}' already exists".format(name))
+        elif '.' in name:
+            raise KeyError("update name can't contain \".\"")
+        elif name == '':
+            raise KeyError("update name can't be empty string \"\"")
+        self._updates[name] = ops
+
+    def should_update(self):
+      if self.training:
+        return True
+      return False
+
+    def maybe_update(self, name: str, yes, no, *, should=None):
+      if should is None:
+        should = self.should_update
+      if should():
+        yes = calling(yes, 1)[0]
+        self.register_update(name=name, ops=yes)
+        return yes
+      else:
+        self.register_update(name=name, ops=None)
+        no = calling(no, 1)[0]
+        return no
+
     def _apply(self, fn):
         for module in self.children():
             module._apply(fn)
@@ -576,6 +628,41 @@ class Module(object):
                 memo.add(v)
                 name = module_prefix + ('.' if module_prefix else '') + k
                 yield name, v
+
+    def updates(self, recurse: py.bool = True) -> Iterator[Iterable[tf.Operation]]:
+        r"""Returns an iterator over module updates.
+
+        Args:
+            recurse (bool): if True, then yields updates of this module
+                and all submodules. Otherwise, yields only updates that
+                are direct members of this module.
+
+        Yields:
+            Operations: module updates
+
+        """
+        for name, ops in self.named_updates(recurse=recurse):
+            yield ops
+
+    def named_updates(self, prefix: str = '', recurse: py.bool = True) -> Iterator[Tuple[str, Iterable[tf.Operation]]]:
+        r"""Returns an iterator over module updates, yielding both the
+        name of the update as well as the updates themselves.
+
+        Args:
+            prefix (str): prefix to prepend to all update names.
+            recurse (bool): if True, then yields updates of this module
+                and all submodules. Otherwise, yields only updates that
+                are direct members of this module.
+
+        Yields:
+            (string, Operation[]): Tuple containing the name and updates
+
+        """
+        gen = self._named_members(
+            lambda module: module._updates.items(),
+            prefix=prefix, recurse=recurse)
+        for elem in gen:
+            yield elem
 
     def parameters(self, recurse: py.bool = True) -> Iterator[Parameter]:
         r"""Returns an iterator over module parameters.
@@ -979,6 +1066,9 @@ class Module(object):
         """
         return ''
 
+    def _reprs(self, **kwargs):
+      return ', '.join([repr(k) + '=' + self.pretty_repr(v) for k, v in kwargs.items()])
+
     def _pretty_sub(self, string):
       rx = re.compile(r"""<tf.Tensor '(?P<name>.+?)' shape=[(](?P<shape>.*?)[)] dtype=(?P<dtype>.*?)>""")
       def sub(m):
@@ -986,6 +1076,8 @@ class Module(object):
         if 'dtype' in found:
           found['dtype'] = found['dtype'].replace('float', 'f')
           found['dtype'] = found['dtype'].replace('int', 'i')
+        if 'shape' in found:
+          found['shape'] = found['shape'].replace(', ', ',')
         return "{dtype}[{shape}, name={name!r}]".format(**found)
       return rx.sub(sub, string)
 
@@ -1183,9 +1275,9 @@ class Sequential(Module):
     # may change dynamically (as is tested in
     # TestScript.test_sequential_intermediary_types).  Cannot annotate
     # with Any as TorchScript expects a more precise type
-    def forward(self, input):
+    def forward(self, input, *args, **kwargs):
         for module in self:
-            input = module(input)
+            input = module(input, *args, **kwargs)
         return input
 
 
@@ -1978,27 +2070,112 @@ def calculate_gain(nonlinearity, param=None):
 
 from tensorflow.python.framework import ops
 from tensorflow.python.ops import gen_resource_variable_ops
+from tensorflow.python.ops import resource_variable_ops
 from tensorflow.python.ops import variables
+from tensorflow.python.eager import context
+from tensorflow.core.framework import attr_value_pb2
+from tensorflow.python.util import compat
+from tensorflow.python.training.tracking import base as trackable
 
 
+def in_graph_mode():
+  return not context.executing_eagerly()
 
-def create_initializer_op(handle, initial_value, name):
-  with ops.name_scope("IsInitialized"):
-    is_initialized_op = (
-        gen_resource_variable_ops.var_is_initialized_op(handle))
-  assert initial_value is not None
-  # pylint: disable=g-backslash-continuation
-  with ops.name_scope("Assign") as n, \
-       ops.colocate_with(None, ignore_existing=True), \
-       ops.device(handle.device):
-    # pylint: disable=protected-access
-    initializer_op = (
-        gen_resource_variable_ops.assign_variable_op(
-            handle,
-            variables._try_guard_against_uninitialized_dependencies(
-                name, initial_value),
-            name=n))
-    return initializer_op
+
+def create_initializer_op(handle, initial_value, name=None, dtype=None, shape=None):
+  if initial_value is None:
+    raise ValueError("initial_value must be specified.")
+  init_from_fn = callable(initial_value)
+  #import pdb; pdb.set_trace()
+  if isinstance(name, str):
+    handle_name = name
+    name, suffix = name.rsplit(':', 1)
+    suffix = ':' + suffix
+  else:
+    handle_name = None
+    suffix = ''
+  with ops.init_scope():
+    _in_graph_mode = in_graph_mode()
+    with ops.name_scope(
+      name,
+      "Variable", [] if init_from_fn else [initial_value],
+      #skip_on_eager=False, # doesn't exist in tf1.15
+      ) as name:
+
+      # pylint: disable=protected-access
+      if handle_name is None:
+        handle_name = ops.name_from_scope_name(name)
+      if _in_graph_mode:
+        shared_name = handle_name
+        unique_id = shared_name
+      else:
+        # When in eager mode use a uid for the shared_name, to prevent
+        # accidental sharing.
+        unique_id = "%s_%d" % (handle_name, ops.uid())
+        shared_name = None  # Never shared
+      # Use attr_scope and device(None) to simulate the behavior of
+      # colocate_with when the variable we want to colocate with doesn't
+      # yet exist.
+      device_context_manager = (
+          ops.device if _in_graph_mode else ops.NullContextmanager)
+      attr = attr_value_pb2.AttrValue(
+          list=attr_value_pb2.AttrValue.ListValue(
+              s=[compat.as_bytes("loc:@%s" % handle_name)]))
+      #import pdb; pdb.set_trace()
+      with ops.get_default_graph()._attr_scope({"_class": attr}):
+        with ops.name_scope("Initializer"), device_context_manager(None):
+          if init_from_fn:
+            initial_value = initial_value()
+          if isinstance(initial_value, trackable.CheckpointInitialValue):
+            raise NotImplementedError() # TODO
+            # self._maybe_initialize_trackable()
+            # self._update_uid = initial_value.checkpoint_position.restore_uid
+            # initial_value = initial_value.wrapped_value
+          initial_value = ops.convert_to_tensor(initial_value,
+                                                name="initial_value",
+                                                dtype=dtype)
+        if shape is not None:
+          if not initial_value.shape.is_compatible_with(shape):
+            raise ValueError(
+                "The initial value's shape (%s) is not compatible with "
+                "the explicitly supplied `shape` argument (%s)." %
+                (initial_value.shape, shape))
+        else:
+          shape = initial_value.shape
+        handle = resource_variable_ops.eager_safe_variable_handle(
+            initial_value=initial_value,
+            shape=shape,
+            shared_name=shared_name,
+            name=name,
+            graph_mode=_in_graph_mode)
+      #import pdb; pdb.set_trace()
+      # pylint: disable=protected-access
+      if (_in_graph_mode and initial_value is not None and
+          initial_value.op._get_control_flow_context() is not None):
+        raise ValueError(
+            "Initializer for variable %s is from inside a control-flow "
+            "construct, such as a loop or conditional. When creating a "
+            "variable inside a loop or conditional, use a lambda as the "
+            "initializer." % handle_name)
+      # pylint: enable=protected-access
+      dtype = initial_value.dtype.base_dtype
+      with ops.name_scope("IsInitialized"):
+        is_initialized_op = (
+            gen_resource_variable_ops.var_is_initialized_op(handle))
+      assert initial_value is not None
+      # pylint: disable=g-backslash-continuation
+      with ops.name_scope("Assign") as n, \
+           ops.colocate_with(None, ignore_existing=True), \
+           ops.device(handle.device):
+        # pylint: disable=protected-access
+        initializer_op = (
+            gen_resource_variable_ops.assign_variable_op(
+                handle,
+                # variables._try_guard_against_uninitialized_dependencies(
+                #     name, initial_value),
+                initial_value,
+                name=n))
+        return initializer_op, is_initialized_op
   
 
 def init_(tensor, value):
@@ -2008,15 +2185,24 @@ def init_(tensor, value):
   # and additionaly is a ResourceVariable? TODO: handle normal variables.
   if not hasattr(tensor, 'handle'):
     raise NotImplementedError("TODO: support non-resource ops; for now just use reource ops everywhere")
-  # overwrite its initializer.
-  tensor._initializer_op = create_initializer_op(
-      handle=tensor.handle,
-      initial_value=value,
-      name=tensor.name)
+  # # overwrite its initializer.
+  # #tensor._initializer_op, tensor._is_initialized_op = create_initializer_op(
+  # initializer_op, is_initialized_op = create_initializer_op(
+  #     handle=tensor.handle,
+  #     initial_value=value,
+  #     name=tensor.name,
+  #     )
+  with ops.init_scope():
+    with tf.control_dependencies([tensor.initializer]):
+      initializer_op = tensor.assign(value() if callable(value) else value, read_value=False, use_locking=True)
+      tf.add_to_collection('tftorch_initializers', initializer_op)
+
 
 
 def uniform_(tensor, minval, maxval):
-  value = tf.random.uniform(shape=tensor.shape, minval=minval, maxval=maxval)
+  # need to create value in a lambda due to creating variables in while
+  # loops on tensorflow
+  value = lambda: tf.random.uniform(shape=tensor.shape, minval=minval, maxval=maxval)
   init_(tensor, value)
 
 
@@ -2529,11 +2715,11 @@ def ones(*size, out=None, **kwargs):
 
 
 def zeros_(tensor):
-  init_(tensor, tf.zeros_like(tensor))
+  init_(tensor, lambda: tf.zeros_like(tensor))
 
 
 def ones_(tensor):
-  init_(tensor, tf.ones_like(tensor))
+  init_(tensor, lambda: tf.ones_like(tensor))
 
 
 
@@ -2577,10 +2763,10 @@ class _NormBase(Module):
                 self.register_parameter('weight', None)
                 self.register_parameter('bias', None)
             if self.track_running_stats:
-                self.register_buffer('accumulated_mean', tf.zeros(num_features))
-                self.register_buffer('accumulated_var', tf.ones(num_features))
-                #self.register_buffer('accumulation_counter', tf.tensor(0, dtype=torch.long))
-                self.register_buffer('accumulation_counter', tf.zeros([]))
+                self.register_buffer('accumulated_mean', lambda: tf.zeros(num_features))
+                self.register_buffer('accumulated_var', lambda: tf.ones(num_features))
+                #self.register_buffer('accumulation_counter', lambda: tf.tensor(0, dtype=torch.long))
+                self.register_buffer('accumulation_counter', lambda: tf.zeros([]))
             else:
                 self.register_parameter('accumulated_mean', None)
                 self.register_parameter('accumulated_var', None)

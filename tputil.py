@@ -735,3 +735,173 @@ def tf_local(name, initial_value, *args, **kws):
 # indices = tf.constant([[4], [3], [1] ,[7]])
 # updates = tf.constant([9, 10, 11, 12])
 # op = v.scatter_nd_assign(indices, updates)
+
+
+def is_string(x):
+  return isinstance(x, str)
+
+
+def is_number(x):
+  return isinstance(x, (int, float))
+
+
+def char(s=None, n=None):
+  __n8 = n or 0
+  if __n8 >= 0 and __n8 < len(s):
+    return s[__n8]
+
+
+def code(s=None, n=None):
+  __x4 = char(s, n)
+  if __x4:
+    return ord(__x4)
+
+
+def is_number_code(n):
+  return n > 47 and n < 58
+
+
+def number(x, base=None):
+  if is_string(x):
+    try:
+      return int(x, base=10 if base is None else base)
+    except ValueError:
+      pass
+    if base is None:
+      try:
+        return float(x)
+      except ValueError:
+        pass
+  elif is_number(x):
+    return x
+
+
+def is_hex_prefix(s):
+  __e = None
+  if code(s, 0) == 45:
+    __e = 1
+  else:
+    __e = 0
+  __i = __e
+  __id2 = code(s, __i) == 48
+  __e1 = None
+  if __id2:
+    __i = __i + 1
+    __n = code(s, __i)
+    __e1 = __n == 120 or __n == 88
+  else:
+    __e1 = __id2
+  return __e1
+
+
+def maybe_number(x):
+  if isinstance(x, bytes):
+    x = x.decode('latin1')
+  if is_string(x):
+    if is_hex_prefix(x):
+      return number(x, base=16)
+    elif is_number_code(code(x, len(x)-1)):
+      return number(x)
+  elif is_number(x):
+    return x
+
+
+def read_value_1(x):
+  v = maybe_number(x)
+  if v is not None:
+    return v
+  return x
+
+
+import ast
+
+
+def read_value(x):
+  try:
+    return ast.literal_eval(x)
+  except ValueError:
+    return x
+  except SyntaxError:
+    return x
+
+
+from urllib import parse
+
+import re
+
+import braces
+
+ # can't use '?' for query_char because it means wildcard match on GCE storage path names
+def parse_patterns(patterns, query_char='&'):
+  if isinstance(patterns, str):
+    pats = []
+    for pattern in braces.braceexpand(patterns):
+      pats.extend(re.split(r',\s*(?:(?=\w+://)|(?=/)|(?=[.]))', pattern))
+    patterns = pats
+  results = []
+  for pattern in patterns:
+    pat, query = pattern.split(query_char, 1) if query_char in pattern else (pattern, '')
+    props = dict(parse.parse_qsl(query))
+    props = {k: read_value(v) for k, v in props.items()}
+    if 'weight' not in props:
+      props['weight'] = 1.0
+    if 'from' not in props:
+      props['from'] = None
+    if 'upto' not in props:
+      props['upto'] = None
+    results.append((pat, props))
+  return results
+
+
+def tf_glob(patterns, query_char='&'):
+  results = []
+  for pat, props in parse_patterns(patterns, query_char=query_char):
+    # tf.io.gfile.glob seems to be deterministic; no need to sort? but
+    # sort anyway.
+    tf.logging.info('tf_glob {pat!r}, {props!r}'.format(pat=pat, props=props))
+    files = list(sorted(tf.io.gfile.glob(pat)))
+    files = files[props['from']:props['upto']]
+    if len(files) <= 0:
+      raise ValueError("Pattern {pat} failed to match any files".format(pat=pat))
+    results.append((pat, props, files))
+  return results
+
+
+
+def tf_parse_file(filename):
+  buffer_size = 8 * 1024 * 1024  # 8 MiB per file
+  dataset = tf.data.TFRecordDataset(filename, buffer_size=buffer_size)
+  return dataset
+
+def tf_parse_files(filenames, num_parallel_calls=64):
+  if isinstance(filenames, (tuple, list)):
+    filenames = tf.data.Dataset.from_tensor_slices(filenames)
+
+  # Read the data from disk in parallel
+  dataset = filenames.apply(
+      tf.contrib.data.parallel_interleave(
+          tf_parse_file, cycle_length=num_parallel_calls, sloppy=True))
+
+  return dataset
+
+
+def tf_sharded_datasets(pattern, num_hosts=1, current_host=0, parse_fn=tf_parse_files):
+  datasets = []
+  weights = []
+  for pat, props, files in tf_glob(pattern):
+    sharded_files = files[current_host::num_hosts]
+    tf.logging.info('host {current_host} of {num_hosts}: Dataset pattern %s with props %s matched %s'.format(current_host=current_host, num_hosts=num_hosts), pat, props, sharded_files)
+    #ds = tf.data.Dataset.from_tensor_slices(sharded_files)
+    #ds = ds.shard(num_hosts, current_host)
+    ds = parse_fn(sharded_files)
+    #ds = ds.repeat()
+    # ds = ds.shuffle(1000)
+    # if parse_fn:
+    #   ds = ds.map(parse_fn)
+    #   # cache parsed results
+    #   ds = ds.cache()
+    datasets.append(ds)
+    weights.append(props['weight'])
+  dataset = tf.data.experimental.sample_from_datasets(datasets, weights=weights)
+  return dataset
+
