@@ -25,11 +25,6 @@ import builtins as py
 
 import re
 
-# See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use
-# of `T` to annotate `self`. Many methods of `Module` return `self` and we want those return values to be
-# the type of the subclass, not the looser type of `Module`.
-T = TypeVar('T', bound='Module')
-
 from typing import TypeVar, Union, Tuple
 #from .. import Tensor
 
@@ -68,6 +63,11 @@ _ratio_any_t = _scalar_or_tuple_any_t[float]
 # eventually eliminate this.
 #_maybe_indices_t = _scalar_or_tuple_2_t[Tensor]
 
+
+# See https://mypy.readthedocs.io/en/latest/generics.html#generic-methods-and-generic-self for the use
+# of `T` to annotate `self`. Many methods of `Module` return `self` and we want those return values to be
+# the type of the subclass, not the looser type of `Module`.
+T = TypeVar('T', bound='Module')
 
 
 def calling(op, nresults=1):
@@ -1637,7 +1637,7 @@ class ParameterList(Module):
         return self.register_parameter(str(idx), param)
 
     def __setattr__(self, key: Any, value: Any) -> None:
-        if not isinstance(value, torch.nn.Parameter):
+        if not isinstance(value, Parameter):
             warnings.warn("Setting attributes on ParameterList is not supported.")
         super(ParameterList, self).__setattr__(key, value)
 
@@ -1684,7 +1684,7 @@ class ParameterList(Module):
             size_str = 'x'.join(str(size) for size in p.size())
             device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
             parastr = 'Parameter containing: [{} of size {}{}]'.format(
-                torch.typename(p), size_str, device_str)
+                torch_typename(p), size_str, device_str)
             child_lines.append('  (' + str(k) + '): ' + parastr)
         tmpstr = '\n'.join(child_lines)
         return tmpstr
@@ -1753,7 +1753,7 @@ class ParameterDict(Module):
         del self._parameters[key]
 
     def __setattr__(self, key: Any, value: Any) -> None:
-        if not isinstance(value, torch.nn.Parameter):
+        if not isinstance(value, Parameter):
             warnings.warn("Setting attributes on ParameterDict is not supported.")
         super(ParameterDict, self).__setattr__(key, value)
 
@@ -1838,7 +1838,7 @@ class ParameterDict(Module):
             size_str = 'x'.join(str(size) for size in p.size())
             device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
             parastr = 'Parameter containing: [{} of size {}{}]'.format(
-                torch.typename(p), size_str, device_str)
+                torch_typename(p), size_str, device_str)
             child_lines.append('  (' + k + '): ' + parastr)
         tmpstr = '\n'.join(child_lines)
         return tmpstr
@@ -3488,8 +3488,9 @@ Example::
 
 
 from typing import Tuple, Union
-from torch import Tensor
-from torch import Size
+
+class Size:
+  pass # TODO
 
 
 class Flatten(Module):
