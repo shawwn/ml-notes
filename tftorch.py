@@ -1264,14 +1264,7 @@ class Sequential(Module):
         with self.scope():
           args = list(args)
           if body is not None:
-            args.append(body)
-          args1 = [x() if callable(x) else x for x in args]
-          args = []
-          for arg in args1:
-            if isinstance(arg, (list, tuple)):
-              args.extend(arg)
-            else:
-              args.append(arg)
+            args.extend(body())
           if len(args) == 1 and isinstance(args[0], OrderedDict):
               for key, module in args[0].items():
                   self.add_module(key, module)
