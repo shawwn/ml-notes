@@ -434,6 +434,10 @@ class Module(object):
         init_(v, initial_value)
         setattr(self, name, v)
       return getattr(self, name)
+    
+    def clone(self):
+      print('warning: .clone() not yet implemented properly')
+      return self # TODO
 
     def register_buffer(self, name: str, tensor: Optional[Tensor], persistent: py.bool = True) -> None:
         r"""Adds a buffer to the module.
@@ -1220,14 +1224,25 @@ class Sequential(Module):
     def __init__(self, arg: 'OrderedDict[str, Module]') -> None:
         ...
 
-    def __init__(self, *args: Any):
-        super(Sequential, self).__init__()
-        if len(args) == 1 and isinstance(args[0], OrderedDict):
-            for key, module in args[0].items():
-                self.add_module(key, module)
-        else:
-            for idx, module in enumerate(args):
-                self.add_module(str(idx), module)
+    def __init__(self, *args: Any, scope=None, body=None, **kwargs):
+        super(Sequential, self).__init__(scope=scope, **kwargs)
+        with self.scope():
+          args = list(args)
+          if body is not None:
+            args.append(body)
+          args1 = [x() if callable(x) else x for x in args]
+          args = []
+          for arg in args1:
+            if isinstance(arg, (list, tuple)):
+              args.extend(arg)
+            else:
+              args.append(arg)
+          if len(args) == 1 and isinstance(args[0], OrderedDict):
+              for key, module in args[0].items():
+                  self.add_module(key, module)
+          else:
+              for idx, module in enumerate(args):
+                  self.add_module(str(idx), module)
 
     def _get_item_by_idx(self, iterator, idx):
         """Get the idx-th item of the iterator"""
@@ -1276,9 +1291,10 @@ class Sequential(Module):
     # TestScript.test_sequential_intermediary_types).  Cannot annotate
     # with Any as TorchScript expects a more precise type
     def forward(self, input, *args, **kwargs):
-        for module in self:
-            input = module(input, *args, **kwargs)
-        return input
+        with self.scope():
+            for module in self:
+                input = module(input, *args, **kwargs)
+            return input
 
 
 class ModuleList(Module):
@@ -2634,11 +2650,13 @@ def max_pool2d(input, kernel_size, stride, padding="SAME", data_format="NHWC", n
 class MaxPool2d(Module):
   def __init__(self,
       kernel_size,
-      stride,
+      stride=None,
       padding=0,
       scope='max_pool2d',
       **kwargs):
     super().__init__(scope=scope, **kwargs)
+    if stride is None:
+      stride = kernel_size
     with self.scope():
       self.kernel_size = _pair(kernel_size)
       self.stride = _pair(stride)
@@ -3183,3 +3201,317 @@ Example::
     raise NotImplementedError()
   return tf.reduce_mean(input, axis=dim, keepdims=keepdim)
 
+
+
+from typing import Tuple, Union
+from torch import Tensor
+from torch import Size
+
+
+class Flatten(Module):
+    r"""
+    Flattens a contiguous range of dims into a tensor. For use with :class:`~nn.Sequential`.
+
+    Shape:
+        - Input: :math:`(N, *dims)`
+        - Output: :math:`(N, \prod *dims)` (for the default case).
+
+    Args:
+        start_dim: first dim to flatten (default = 1).
+        end_dim: last dim to flatten (default = -1).
+
+    Examples::
+        >>> input = torch.randn(32, 1, 5, 5)
+        >>> m = nn.Sequential(
+        >>>     nn.Conv2d(1, 32, 5, 1, 1),
+        >>>     nn.Flatten()
+        >>> )
+        >>> output = m(input)
+        >>> output.size()
+        torch.Size([32, 288])
+    """
+    __constants__ = ['start_dim', 'end_dim']
+    start_dim: int
+    end_dim: int
+
+    def __init__(self, start_dim: int = 1, end_dim: int = -1, scope='flatten', **kwargs) -> None:
+        super(Flatten, self).__init__(scope=scope, **kwargs)
+        with self.scope():
+            self.start_dim = start_dim
+            self.end_dim = end_dim
+
+    def forward(self, input: Tensor) -> Tensor:
+        with self.scope():
+            return input.flatten(self.start_dim, self.end_dim)
+
+    def extra_repr(self) -> str:
+        return 'start_dim={}, end_dim={}'.format(
+            self.start_dim, self.end_dim
+        )
+
+
+class Unflatten(Module):
+    r"""
+    Unflattens a tensor dim expanding it to a desired shape. For use with :class:`~nn.Sequential`.
+
+    * :attr:`dim` specifies the dimension of the input tensor to be unflattened, and it can
+      be either `int` or `str` when `Tensor` or `NamedTensor` is used, respectively.
+
+    * :attr:`unflattened_size` is the new shape of the unflattened dimension of the tensor and it can be
+      a `tuple` of ints or `torch.Size` for `Tensor` input or a `NamedShape` (tuple of `(name, size)` tuples)
+      for `NamedTensor` input.
+
+    Shape:
+        - Input: :math:`(N, *dims)`
+        - Output: :math:`(N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}})`
+
+    Args:
+        dim (Union[int, str]): Dimension to be unflattened
+        unflattened_size (Union[torch.Size, NamedShape]): New shape of the unflattened dimension
+
+    Examples:
+        >>> input = torch.randn(2, 50)
+        >>> # With tuple of ints
+        >>> m = nn.Sequential(
+        >>>     nn.Linear(50, 50),
+        >>>     nn.Unflatten(1, (2, 5, 5))
+        >>> )
+        >>> output = m(output)
+        >>> output.size()
+        torch.Size([2, 2, 5, 5])
+        >>> # With torch.Size
+        >>> m = nn.Sequential(
+        >>>     nn.Linear(50, 50),
+        >>>     nn.Unflatten(1, torch.Size([2, 5, 5]))
+        >>> )
+        >>> output = m(output)
+        >>> output.size()
+        torch.Size([2, 2, 5, 5])
+        >>> # With namedshape (tuple of tuples)
+        >>> m = nn.Sequential(
+        >>>     nn.Linear(50, 50),
+        >>>     nn.Unflatten('features', (('C', 2), ('H', 50), ('W',50)))
+        >>> )
+        >>> output = m(output)
+        >>> output.size()
+        torch.Size([2, 2, 5, 5])
+    """
+    NamedShape = Tuple[Tuple[str, int]]
+
+    __constants__ = ['dim', 'unflattened_size']
+    dim: Union[int, str]
+    unflattened_size: Union[Size, NamedShape]
+
+    def __init__(self, dim: Union[int, str], unflattened_size: Union[Size, NamedShape], scope='unflatten', **kwargs) -> None:
+        super(Unflatten, self).__init__(scope=scope, **kwargs)
+        with self.scope():
+
+            if isinstance(dim, int):
+                self._require_tuple_int(unflattened_size)
+            elif isinstance(dim, str):
+                self._require_tuple_tuple(unflattened_size)
+            else:
+                raise TypeError("invalid argument type for dim parameter")
+
+            self.dim = dim
+            self.unflattened_size = unflattened_size
+
+    def _require_tuple_tuple(self, input):
+        if (isinstance(input, tuple)):
+            for idx, elem in enumerate(input):
+                if not isinstance(elem, tuple):
+                    raise TypeError("unflattened_size must be tuple of tuples, " + 
+                                    "but found element of type {} at pos {}".format(type(elem).__name__, idx))
+            return
+        raise TypeError("unflattened_size must be a tuple of tuples, " +
+                        "but found type {}".format(type(input).__name__))
+
+    def _require_tuple_int(self, input):
+        if (isinstance(input, tuple)):
+            for idx, elem in enumerate(input):
+                if not isinstance(elem, int):
+                    raise TypeError("unflattened_size must be tuple of ints, " + 
+                                    "but found element of type {} at pos {}".format(type(elem).__name__, idx))
+            return
+        raise TypeError("unflattened_size must be a tuple of ints, but found type {}".format(type(input).__name__))
+
+    def forward(self, input: Tensor) -> Tensor:
+        with self.scope():
+            return input.unflatten(self.dim, self.unflattened_size)
+
+    def extra_repr(self) -> str:
+        return 'dim={}, unflattened_size={}'.format(self.dim, self.unflattened_size)
+
+
+def log_softmax(input, dim=None, _stacklevel=3, dtype=None, name=None):
+    # type: (Tensor, Optional[int], int, Optional[int]) -> Tensor
+    r"""Applies a softmax followed by a logarithm.
+
+    While mathematically equivalent to log(softmax(x)), doing these two
+    operations separately is slower, and numerically unstable. This function
+    uses an alternative formulation to compute the output and gradient correctly.
+
+    See :class:`~torch.nn.LogSoftmax` for more details.
+
+    Arguments:
+        input (Tensor): input
+        dim (int): A dimension along which log_softmax will be computed.
+        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+          If specified, the input tensor is casted to :attr:`dtype` before the operation
+          is performed. This is useful for preventing data type overflows. Default: None.
+    """
+    # if not torch.jit.is_scripting():
+    #     if type(input) is not Tensor and has_torch_function((input,)):
+    #         return handle_torch_function(
+    #             log_softmax, (input,), input, dim=dim, _stacklevel=_stacklevel, dtype=dtype)
+    # if dim is None:
+    #     dim = _get_softmax_dim('log_softmax', dim(input), _stacklevel)
+    # if dtype is None:
+    #     ret = input.log_softmax(dim)
+    # else:
+    #     ret = input.log_softmax(dim, dtype=dtype)
+    ret = tf.nn.log_softmax(input, axis=dim, dtype=dtype, name=name)
+    return ret
+
+
+
+class LogSoftmax(Module):
+    r"""Applies the :math:`\log(\text{Softmax}(x))` function to an n-dimensional
+    input Tensor. The LogSoftmax formulation can be simplified as:
+
+    .. math::
+        \text{LogSoftmax}(x_{i}) = \log\left(\frac{\exp(x_i) }{ \sum_j \exp(x_j)} \right)
+
+    Shape:
+        - Input: :math:`(*)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(*)`, same shape as the input
+
+    Arguments:
+        dim (int): A dimension along which LogSoftmax will be computed.
+
+    Returns:
+        a Tensor of the same dimension and shape as the input with
+        values in the range [-inf, 0)
+
+    Examples::
+
+        >>> m = nn.LogSoftmax()
+        >>> input = torch.randn(2, 3)
+        >>> output = m(input)
+    """
+    __constants__ = ['dim']
+    dim: Optional[int]
+
+    def __init__(self, dim: Optional[int] = None, scope='log_softmax', **kwargs) -> None:
+        super(LogSoftmax, self).__init__(scope=scope, **kwargs)
+        with self.scope():
+            self.dim = dim
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if not hasattr(self, 'dim'):
+            self.dim = None
+
+    def forward(self, input: Tensor) -> Tensor:
+        with self.scope():
+            return log_softmax(input, self.dim, _stacklevel=5)
+
+    def extra_repr(self):
+        return 'dim={dim}'.format(dim=self.dim)
+
+
+
+
+class ResidualBlock(Sequential):
+    r"""A residual block with an identity shortcut connection.
+    As in :class:`~torch.nn.Sequential`, modules will be added to it in the
+    order they are passed in the constructor, and an :class:`OrderedDict` can be
+    passed instead. The final module's output will be added to the original
+    input and returned. The input and output must be :ref:`broadcastable
+    <broadcasting-semantics>`.
+    Here is an example MNIST classifier::
+        model = nn.Sequential(
+            nn.Conv2d(1, 10, 1),
+            nn.ResidualBlock(
+                nn.ReLU(),
+                nn.Conv2d(10, 10, 3, padding=1),
+                nn.ReLU(),
+                nn.Conv2d(10, 10, 3, padding=1),
+            ),
+            nn.MaxPool2d(2),
+            nn.ResidualBlock(
+                nn.ReLU(),
+                nn.Conv2d(10, 10, 3, padding=1),
+                nn.ReLU(),
+                nn.Conv2d(10, 10, 3, padding=1),
+            ),
+            nn.MaxPool2d(2),
+            nn.Flatten(),
+            nn.Linear(7*7*10, 10),
+            nn.LogSoftmax(dim=-1),
+        )
+    See: Kaiming He, Xiangyu Zhang, Shaoqing Ren, Jian Sun, "Deep Residual
+    Learning for Image Recognition" (https://arxiv.org/abs/1512.03385), and
+    "Identity Mappings in Deep Residual Networks"
+    (https://arxiv.org/abs/1603.05027).
+    """
+    def __init__(self, *args, scope='residual', **kwargs):
+        super(ResidualBlock, self).__init__(*args, scope=scope, **kwargs)
+
+    def forward(self, input):
+        with self.scope():
+            output = input.clone()
+            for module in self:
+                output = module(output)
+            return input + output
+
+
+class ResidualBlockWithShortcut(ModuleDict):
+    r"""A residual block with a non-identity shortcut connection.
+    As in :class:`~torch.nn.Sequential`, modules will be added to the 'main'
+    branch in the order they are passed in the constructor, and an
+    :class:`OrderedDict` can be passed instead. The :attr:`shortcut` keyword
+    argument specifies a module that performs the mapping for the shortcut
+    connection.  The output of the 'main' branch will be added to the output of
+    the 'shortcut' branch and returned. They must be :ref:`broadcastable
+    <broadcasting-semantics>`.
+    This module is useful where the 'main' branch has an output shape that is
+    different from its input shape, so :class:`~torch.nn.ResidualBlock` cannot
+    be used. The shortcut mapping may be used to adjust the shape of the input
+    to match. Here is an example MNIST classifier::
+        model = nn.Sequential(
+            nn.ResidualBlockWithShortcut(
+                nn.Conv2d(1, 10, 3, padding=1),
+                nn.ReLU(),
+                nn.Conv2d(10, 10, 3, stride=2, padding=1),
+                shortcut=nn.Conv2d(1, 10, 1, stride=2, bias=False),
+            ),
+            nn.ResidualBlockWithShortcut(
+                nn.ReLU(),
+                nn.Conv2d(10, 20, 3, padding=1),
+                nn.ReLU(),
+                nn.Conv2d(20, 20, 3, stride=2, padding=1),
+                shortcut=nn.Conv2d(10, 20, 1, stride=2, bias=False),
+            ),
+            nn.Flatten(),
+            nn.Linear(7*7*20, 10),
+            nn.LogSoftmax(dim=-1),
+        )
+    See: Kaiming He, Xiangyu Zhang, Shaoqing Ren, Jian Sun, "Deep Residual
+    Learning for Image Recognition" (https://arxiv.org/abs/1512.03385), and
+    "Identity Mappings in Deep Residual Networks"
+    (https://arxiv.org/abs/1603.05027).
+    """
+
+    def __init__(self, *args, shortcut=Identity(), scope='residual_sc', **kwargs):
+        super(ResidualBlockWithShortcut, self).__init__(scope=scope, **kwargs)
+        with self.scope():
+            self.main = Sequential(*args)
+            self.shortcut = shortcut
+
+    def forward(self, input):
+        with self.scope():
+            output_main = self.main(input.clone())
+            output_shortcut = self.shortcut(input)
+            return output_main + output_shortcut
