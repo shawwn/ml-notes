@@ -474,10 +474,6 @@ class Module(object):
         setattr(self, name, v)
       return getattr(self, name)
     
-    def clone(self):
-      print('warning: .clone() not yet implemented properly')
-      return self # TODO
-
     def register_buffer(self, name: str, tensor: Optional[Tensor], persistent: py.bool = True) -> None:
         r"""Adds a buffer to the module.
 
@@ -2057,6 +2053,15 @@ def permute(tensor, *pattern, name=None):
   return tf.transpose(tensor, pattern, name=name)
 
 
+def flatten(tensor, start_dim=1, end_dim=-1, name=None):
+  dims = dim(tensor)
+  if end_dim < 0:
+    end_dim = dims + end_dim
+  shape = shapelist(tensor)
+  out_shape = shape[0:start_dim] + [-1] + shape[end_dim+1:]
+  return tf.reshape(tensor, shape=out_shape, name=name)
+
+
 def cat(x, axis, name=None):
   return tf.concat(x, axis=axis, name=name)
 
@@ -2079,6 +2084,13 @@ def randn(*shape):
 
 def detach(v, name=None):
   return tf.stop_gradient(v, name=name)
+
+
+def clone(tensor, name=None):
+  if name is None:
+    name = tensor.name.rsplit(':', 1)[0] + '_clone'
+  return tf.identity(tensor, name=name)
+
 
 
 def calculate_gain(nonlinearity, param=None):
@@ -2671,7 +2683,16 @@ upsample = interpolate
 downsample = partial(pool, kernel_size=2)
 
 
-def max_pool2d(input, kernel_size, stride, padding="SAME", data_format="NHWC", name=None):
+def max_pool2d(input, kernel_size, stride, padding="SAME", dilation=1, ceil_mode=False, return_indices=False, *, data_format="NHWC", name=None):
+  if dilation != 1:
+    import pdb; pdb.set_trace()
+    raise NotImplementedError()
+  if ceil_mode != False:
+    import pdb; pdb.set_trace()
+    raise NotImplementedError()
+  if return_indices != False:
+    import pdb; pdb.set_trace()
+    raise NotImplementedError()
   kernel_size = _pair(kernel_size)
   strides = _pair(stride)
   #padding = padding or "SAME"
@@ -3512,7 +3533,7 @@ class Flatten(Module):
 
     def forward(self, input: Tensor) -> Tensor:
         with self.scope():
-            return input.flatten(self.start_dim, self.end_dim)
+            return flatten(input, self.start_dim, self.end_dim)
 
     def extra_repr(self) -> str:
         return 'start_dim={}, end_dim={}'.format(
@@ -3607,7 +3628,7 @@ class Unflatten(Module):
 
     def forward(self, input: Tensor) -> Tensor:
         with self.scope():
-            return input.unflatten(self.dim, self.unflattened_size)
+            return unflatten(input, self.dim, self.unflattened_size)
 
     def extra_repr(self) -> str:
         return 'dim={}, unflattened_size={}'.format(self.dim, self.unflattened_size)
@@ -3640,7 +3661,9 @@ def log_softmax(input, dim=None, _stacklevel=3, dtype=None, name=None):
     #     ret = input.log_softmax(dim)
     # else:
     #     ret = input.log_softmax(dim, dtype=dtype)
-    ret = tf.nn.log_softmax(input, axis=dim, dtype=dtype, name=name)
+    if dtype is not None:
+      input = tf.cast(input, dtype)
+    ret = tf.nn.log_softmax(input, axis=dim, name=name)
     return ret
 
 
@@ -3731,7 +3754,7 @@ class ResidualBlock(Sequential):
 
     def forward(self, input):
         with self.scope():
-            output = input.clone()
+            output = clone(input)
             for module in self:
                 output = module(output)
             return input + output
@@ -3782,6 +3805,6 @@ class ResidualBlockWithShortcut(ModuleDict):
 
     def forward(self, input):
         with self.scope():
-            output_main = self.main(input.clone())
+            output_main = self.main(clone(input))
             output_shortcut = self.shortcut(input)
             return output_main + output_shortcut
