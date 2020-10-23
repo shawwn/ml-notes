@@ -30,6 +30,45 @@ import re
 # the type of the subclass, not the looser type of `Module`.
 T = TypeVar('T', bound='Module')
 
+from typing import TypeVar, Union, Tuple
+#from .. import Tensor
+
+# Create some useful type aliases
+
+# Template for arguments which can be supplied as a tuple, or which can be a scalar which PyTorch will internally
+# broadcast to a tuple.
+# Comes in several variants: A tuple of unknown size, and a fixed-size tuple for 1d, 2d, or 3d operations.
+T = TypeVar('T')
+_scalar_or_tuple_any_t = Union[T, Tuple[T, ...]]
+_scalar_or_tuple_1_t = Union[T, Tuple[T]]
+_scalar_or_tuple_2_t = Union[T, Tuple[T, T]]
+_scalar_or_tuple_3_t = Union[T, Tuple[T, T, T]]
+_scalar_or_tuple_4_t = Union[T, Tuple[T, T, T, T]]
+_scalar_or_tuple_5_t = Union[T, Tuple[T, T, T, T, T]]
+_scalar_or_tuple_6_t = Union[T, Tuple[T, T, T, T, T, T]]
+
+# For arguments which represent size parameters (eg, kernel size, padding)
+_size_any_t = _scalar_or_tuple_any_t[int]
+_size_1_t = _scalar_or_tuple_1_t[int]
+_size_2_t = _scalar_or_tuple_2_t[int]
+_size_3_t = _scalar_or_tuple_3_t[int]
+_size_4_t = _scalar_or_tuple_4_t[int]
+_size_5_t = _scalar_or_tuple_5_t[int]
+_size_6_t = _scalar_or_tuple_6_t[int]
+
+# For arguments that represent a ratio to adjust each dimension of an input with (eg, upsampling parameters)
+_ratio_2_t = _scalar_or_tuple_2_t[float]
+_ratio_3_t = _scalar_or_tuple_3_t[float]
+_ratio_any_t = _scalar_or_tuple_any_t[float]
+
+#_tensor_list_t = _scalar_or_tuple_any_t[Tensor]
+
+# For the return value of max pooling operations that may or may not return indices.
+# With the proposed 'Literal' feature to Python typing, it might be possible to
+# eventually eliminate this.
+#_maybe_indices_t = _scalar_or_tuple_2_t[Tensor]
+
+
 
 def calling(op, nresults=1):
   if callable(op):
@@ -2647,23 +2686,254 @@ def max_pool2d(input, kernel_size, stride, padding="SAME", data_format="NHWC", n
   #return tf.nn.pool(input, kernel_size, "MAX", "SAME", strides=strides, name=name)
 
 
-class MaxPool2d(Module):
-  def __init__(self,
-      kernel_size,
-      stride=None,
-      padding=0,
-      scope='max_pool2d',
-      **kwargs):
-    super().__init__(scope=scope, **kwargs)
-    if stride is None:
-      stride = kernel_size
-    with self.scope():
-      self.kernel_size = _pair(kernel_size)
-      self.stride = _pair(stride)
-      self.padding = padding
-  def forward(self, input):
-    with self.scope():
-      return max_pool2d(input, self.kernel_size, self.stride, self.padding)
+# class MaxPool2d(Module):
+#   def __init__(self,
+#       kernel_size,
+#       stride=None,
+#       padding=0,
+#       scope='max_pool2d',
+#       **kwargs):
+#     super().__init__(scope=scope, **kwargs)
+#     if stride is None:
+#       stride = kernel_size
+#     with self.scope():
+#       self.kernel_size = _pair(kernel_size)
+#       self.stride = _pair(stride)
+#       self.padding = padding
+#   def forward(self, input):
+#     with self.scope():
+#       return max_pool2d(input, self.kernel_size, self.stride, self.padding)
+
+
+class _MaxPoolNd(Module):
+    __constants__ = ['kernel_size', 'stride', 'padding', 'dilation',
+                     'return_indices', 'ceil_mode']
+    return_indices: bool
+    ceil_mode: bool
+
+    def __init__(self, kernel_size: _size_any_t, stride: Optional[_size_any_t] = None,
+                 padding: _size_any_t = 0, dilation: _size_any_t = 1,
+                 return_indices: bool = False, ceil_mode: bool = False, scope=None, **kwargs) -> None:
+        if scope is None:
+            scope = self.__class__.scope_name
+        super(_MaxPoolNd, self).__init__(scope=scope, **kwargs)
+        with self.scope():
+            self.kernel_size = kernel_size
+            self.stride = stride if (stride is not None) else kernel_size
+            self.padding = padding
+            self.dilation = dilation
+            self.return_indices = return_indices
+            self.ceil_mode = ceil_mode
+
+    def extra_repr(self) -> str:
+        return 'kernel_size={kernel_size}, stride={stride}, padding={padding}' \
+            ', dilation={dilation}, ceil_mode={ceil_mode}'.format(**self.__dict__)
+
+
+class MaxPool1d(_MaxPoolNd):
+    r"""Applies a 1D max pooling over an input signal composed of several input
+    planes.
+
+    In the simplest case, the output value of the layer with input size :math:`(N, C, L)`
+    and output :math:`(N, C, L_{out})` can be precisely described as:
+
+    .. math::
+        out(N_i, C_j, k) = \max_{m=0, \ldots, \text{kernel\_size} - 1}
+                input(N_i, C_j, stride \times k + m)
+
+    If :attr:`padding` is non-zero, then the input is implicitly padded with negative infinity on both sides
+    for :attr:`padding` number of points. :attr:`dilation` is the stride between the elements within the
+    sliding window. This `link`_ has a nice visualization of the pooling parameters.
+
+    Args:
+        kernel_size: The size of the sliding window, must be > 0.
+        stride: The stride of the sliding window, must be > 0. Default value is :attr:`kernel_size`.
+        padding: Implicit negative infinity padding to be added on both sides, must be >= 0 and <= kernel_size / 2.
+        dilation: The stride between elements within a sliding window, must be > 0.
+        return_indices: If ``True``, will return the argmax along with the max values.
+                        Useful for :class:`torch.nn.MaxUnpool1d` later
+        ceil_mode: If ``True``, will use `ceil` instead of `floor` to compute the output shape. This
+                   ensures that every element in the input tensor is covered by a sliding window.
+
+    Shape:
+        - Input: :math:`(N, C, L_{in})`
+        - Output: :math:`(N, C, L_{out})`, where
+
+          .. math::
+              L_{out} = \left\lfloor \frac{L_{in} + 2 \times \text{padding} - \text{dilation}
+                    \times (\text{kernel\_size} - 1) - 1}{\text{stride}} + 1\right\rfloor
+
+    Examples::
+
+        >>> # pool of size=3, stride=2
+        >>> m = nn.MaxPool1d(3, stride=2)
+        >>> input = torch.randn(20, 16, 50)
+        >>> output = m(input)
+
+    .. _link:
+        https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
+    """
+
+    scope_name='max_pool1d'
+    kernel_size: _size_1_t
+    stride: _size_1_t
+    padding: _size_1_t
+    dilation: _size_1_t
+
+    def forward(self, input: Tensor) -> Tensor:
+        with self.scope():
+            return max_pool1d(input, self.kernel_size, self.stride,
+                              self.padding, self.dilation, self.ceil_mode,
+                              self.return_indices)
+
+
+class MaxPool2d(_MaxPoolNd):
+    r"""Applies a 2D max pooling over an input signal composed of several input
+    planes.
+
+    In the simplest case, the output value of the layer with input size :math:`(N, C, H, W)`,
+    output :math:`(N, C, H_{out}, W_{out})` and :attr:`kernel_size` :math:`(kH, kW)`
+    can be precisely described as:
+
+    .. math::
+        \begin{aligned}
+            out(N_i, C_j, h, w) ={} & \max_{m=0, \ldots, kH-1} \max_{n=0, \ldots, kW-1} \\
+                                    & \text{input}(N_i, C_j, \text{stride[0]} \times h + m,
+                                                   \text{stride[1]} \times w + n)
+        \end{aligned}
+
+    If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
+    for :attr:`padding` number of points. :attr:`dilation` controls the spacing between the kernel points.
+    It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
+
+    The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`dilation` can either be:
+
+        - a single ``int`` -- in which case the same value is used for the height and width dimension
+        - a ``tuple`` of two ints -- in which case, the first `int` is used for the height dimension,
+          and the second `int` for the width dimension
+
+    Args:
+        kernel_size: the size of the window to take a max over
+        stride: the stride of the window. Default value is :attr:`kernel_size`
+        padding: implicit zero padding to be added on both sides
+        dilation: a parameter that controls the stride of elements in the window
+        return_indices: if ``True``, will return the max indices along with the outputs.
+                        Useful for :class:`torch.nn.MaxUnpool2d` later
+        ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
+
+    Shape:
+        - Input: :math:`(N, C, H_{in}, W_{in})`
+        - Output: :math:`(N, C, H_{out}, W_{out})`, where
+
+          .. math::
+              H_{out} = \left\lfloor\frac{H_{in} + 2 * \text{padding[0]} - \text{dilation[0]}
+                    \times (\text{kernel\_size[0]} - 1) - 1}{\text{stride[0]}} + 1\right\rfloor
+
+          .. math::
+              W_{out} = \left\lfloor\frac{W_{in} + 2 * \text{padding[1]} - \text{dilation[1]}
+                    \times (\text{kernel\_size[1]} - 1) - 1}{\text{stride[1]}} + 1\right\rfloor
+
+    Examples::
+
+        >>> # pool of square window of size=3, stride=2
+        >>> m = nn.MaxPool2d(3, stride=2)
+        >>> # pool of non-square window
+        >>> m = nn.MaxPool2d((3, 2), stride=(2, 1))
+        >>> input = torch.randn(20, 16, 50, 32)
+        >>> output = m(input)
+
+    .. _link:
+        https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
+    """
+
+    scope_name='max_pool2d'
+    kernel_size: _size_2_t
+    stride: _size_2_t
+    padding: _size_2_t
+    dilation: _size_2_t
+
+    def forward(self, input: Tensor) -> Tensor:
+        with self.scope():
+            return max_pool2d(input, self.kernel_size, self.stride,
+                              self.padding, self.dilation, self.ceil_mode,
+                              self.return_indices)
+
+
+class MaxPool3d(_MaxPoolNd):
+    r"""Applies a 3D max pooling over an input signal composed of several input
+    planes.
+
+    In the simplest case, the output value of the layer with input size :math:`(N, C, D, H, W)`,
+    output :math:`(N, C, D_{out}, H_{out}, W_{out})` and :attr:`kernel_size` :math:`(kD, kH, kW)`
+    can be precisely described as:
+
+    .. math::
+        \begin{aligned}
+            \text{out}(N_i, C_j, d, h, w) ={} & \max_{k=0, \ldots, kD-1} \max_{m=0, \ldots, kH-1} \max_{n=0, \ldots, kW-1} \\
+                                              & \text{input}(N_i, C_j, \text{stride[0]} \times d + k,
+                                                             \text{stride[1]} \times h + m, \text{stride[2]} \times w + n)
+        \end{aligned}
+
+    If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
+    for :attr:`padding` number of points. :attr:`dilation` controls the spacing between the kernel points.
+    It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
+
+    The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`dilation` can either be:
+
+        - a single ``int`` -- in which case the same value is used for the depth, height and width dimension
+        - a ``tuple`` of three ints -- in which case, the first `int` is used for the depth dimension,
+          the second `int` for the height dimension and the third `int` for the width dimension
+
+    Args:
+        kernel_size: the size of the window to take a max over
+        stride: the stride of the window. Default value is :attr:`kernel_size`
+        padding: implicit zero padding to be added on all three sides
+        dilation: a parameter that controls the stride of elements in the window
+        return_indices: if ``True``, will return the max indices along with the outputs.
+                        Useful for :class:`torch.nn.MaxUnpool3d` later
+        ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
+
+    Shape:
+        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
+        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})`, where
+
+          .. math::
+              D_{out} = \left\lfloor\frac{D_{in} + 2 \times \text{padding}[0] - \text{dilation}[0] \times
+                (\text{kernel\_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
+
+          .. math::
+              H_{out} = \left\lfloor\frac{H_{in} + 2 \times \text{padding}[1] - \text{dilation}[1] \times
+                (\text{kernel\_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
+
+          .. math::
+              W_{out} = \left\lfloor\frac{W_{in} + 2 \times \text{padding}[2] - \text{dilation}[2] \times
+                (\text{kernel\_size}[2] - 1) - 1}{\text{stride}[2]} + 1\right\rfloor
+
+    Examples::
+
+        >>> # pool of square window of size=3, stride=2
+        >>> m = nn.MaxPool3d(3, stride=2)
+        >>> # pool of non-square window
+        >>> m = nn.MaxPool3d((3, 2, 2), stride=(2, 1, 2))
+        >>> input = torch.randn(20, 16, 50,44, 31)
+        >>> output = m(input)
+
+    .. _link:
+        https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
+    """  # noqa: E501
+
+    scope_name='max_pool3d'
+    kernel_size: _size_3_t
+    stride: _size_3_t
+    padding: _size_3_t
+    dilation: _size_3_t
+
+    def forward(self, input: Tensor) -> Tensor:
+        with self.scope():
+            return max_pool3d(input, self.kernel_size, self.stride,
+                              self.padding, self.dilation, self.ceil_mode,
+                              self.return_indices)
+
 
 
 def avg_pool2d(input, kernel_size, stride=None, padding=0, data_format="NHWC", name=None):
