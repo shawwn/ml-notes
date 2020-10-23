@@ -51,6 +51,17 @@ def tpu_get(k):
 
 
 
+def enq(*values, name):
+  return tft.tpu_cpu(lambda vs: tf.raw_ops.Stage(values=vs, container=name, shared_name=name), values)
+
+def dtypes_of(xs):
+  return [x.dtype if hasattr(x, 'dtype') else x for x in xs]
+
+def deq(*dtypes, name):
+  return tft.tpu_cpu(lambda vs: tf.raw_ops.Unstage(dtypes=dtypes_of(dtypes), container=name, shared_name=name), values)
+
+
+
 import functools
 import sys
 
