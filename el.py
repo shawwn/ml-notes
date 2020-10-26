@@ -317,15 +317,15 @@ def defalias(name, definition, *, doc=None):
 
 import inspect
 
-def call(f, *args, **kws):
-  if symbolp(f):
-    f = symbol_function(f)
-  return f(*args, **kws)
-
 def eval(x):
   if symbolp(x):
     return symbol_value(x)
   return x
+
+def call(f, *args, **kws):
+  if symbolp(f):
+    f = symbol_function(f)
+  return f(*args, **kws)
 
 def run_hooks(*hookvars):
   for hookvar in hookvars:
@@ -350,7 +350,6 @@ def run_hook_with_args_until_success(hook, *args, **kws):
       result = call(fn, *args, **kws)
       if result is not None:
         return result
-    
 
 def run_hook_with_args_until_failure(hook, *args, **kws):
   if symbolp(hook):
@@ -364,8 +363,6 @@ def run_hook_with_args_until_failure(hook, *args, **kws):
         return result
   return True
     
-
-y_iteration_hooks = []
 
 def y_for(h, upto=None):
   if inspect.ismodule(h):
@@ -403,9 +400,6 @@ def maybe_int(x):
       pass
   return x
 
-def null(x):
-  return x is None
-
 def isa(x, *types):
   return isinstance(x, types)
 
@@ -419,18 +413,20 @@ def clamp(n, lo=None, hi=None):
 def iterable(x):
   return isinstance(x, abc.Iterable)
 
-def no(x):
-  if x is None:
-    return True
-  if x is False:
-    return True
-  if iterable(x) and len(x) == 0:
-    return True
-  return False
+# def no(x):
+#   if x is None:
+#     return True
+#   if x is False:
+#     return True
+#   if iterable(x) and len(x) == 0:
+#     return True
+#   return False
 
-def yes(x):
-  return not no(x)
+# def yes(x):
+#   return not no(x)
 
+def null(x):
+  return x is None
 
 def nil(x):
   return null(x) or none63(x)
