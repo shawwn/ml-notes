@@ -45,6 +45,8 @@ def symbol_plist(x):
   return G.get(symbol_plist_id(x))
 
 def plist_get(plist, property):
+  if plist is None:
+    return None
   n = len(plist)
   for i in range(0, n, 2):
     if plist[i] == property:
