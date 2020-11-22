@@ -126,7 +126,7 @@ def _tpu_host():
 
 def mock_master(cls, *args, **kws):
   ip = _master(cls, *args, **kws)
-  return reroute(ip, host=os.environ['TPU_HOST'])
+  return reroute(ip, host=os.environ.get('TPU_HOST', None))
 
 _cluster_spec = resolver.TPUClusterResolver.cluster_spec
 
@@ -134,7 +134,7 @@ def cluster_spec(cls, *args, **kws):
   spec = _cluster_spec(cls, *args, **kws)
   r = dict()
   for k, v in spec.as_dict().items():
-    r[k] = [reroute(ip, host=os.environ['TPU_HOST']) for ip in v]
+    r[k] = [reroute(ip, host=os.environ.get('TPU_HOST', None)) for ip in v]
   return server_lib.ClusterSpec(r)
 
 
