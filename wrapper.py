@@ -15,6 +15,8 @@ import json
 import base64
 from six.moves.urllib.error import URLError
 
+
+from tensorflow.python.eager import context
 from tensorflow.python import framework
 from tensorflow.python.client import session
 from tensorflow.python.distribute.cluster_resolver import tpu_cluster_resolver as resolver
@@ -90,9 +92,11 @@ class TPUClusterResolver(BaseTPUClusterResolver):
     r = dict()
     for k, v in spec.as_dict().items():
       r[k] = [reroute(ip, host=self._host) for ip in v]
-    i = self._node_count or len(r['worker'])
+    #k = 'worker'
+    i = self._node_count or len(r[k])
     j = self._node_offset or 0
-    r['worker'] = [r['worker'][0]] + r['worker'][(j+1):(j+1)+(i-1)]
+    for k, v in r.items():
+      r[k] = [r[k][0]] + r[k][(j+1):(j+1)+(i-1)]
     spec2 = server_lib.ClusterSpec(r)
     print(spec2.as_cluster_def())
     return spec2
