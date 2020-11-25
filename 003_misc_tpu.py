@@ -429,3 +429,80 @@ x = tf.dynamic_stitch(condition_indices, partitioned_data)
 
 
 tf.raw_ops.EmptyTensorList(element_shape=(1,), max_num_elements=1, element_dtype=tf.int32)
+
+
+
+
+
+
+
+
+
+
+
+# graph-based record reading:
+>>> reader = tf.compat.v1.TFRecordReader()
+>>> queue = tf.FIFOQueue(99, [tf.string], shapes=())
+>>> work_completed = reader.num_work_units_completed()
+>>> produced = reader.num_records_produced()
+>>> queued_length = queue.size()
+>>> r(queued_length)
+0
+>>> op = queue.enqueue_many([["gs://tpu-usc1/datasets/imagenet/validation-00117-of-00128" ]])
+>>> op
+<tf.Operation 'fifo_queue_EnqueueMany' type=QueueEnqueueManyV2>
+>>> r(op)
+>>> r(work_completed)
+0
+>>> r(produced)
+0
+>>> kv = reader.read(queue)
+>>> kv
+ReaderReadV2(key=<tf.Tensor 'ReaderReadV2:0' shape=() dtype=string>, value=<tf.Tensor 'ReaderReadV2:1' shape=() dtype=string>)
+>>> r(kv)
+ReaderReadV2(key=b'gs://tpu-usc1/datasets/imagenet/validation-00117-of-00128:0', value=b'\n\xc....')
+
+
+# immediate record reading:
+from tensorflow.python.lib.io import tf_record
+rdr = tf_record.tf_record_random_reader( 'gs://tpu-usc1/datasets/imagenet/validation-00117-of-00128' )
+rec = (b'', 0)
+rec = rdr.read(rec[-1])
+rec = rdr.read(rec[-1])
+rec = rdr.read(rec[-1])
+...
+from google.protobuf.json_format import MessageToJson
+print(MessageToJson(tf.train.Example.FromString(zz[0])))
+
+
+
+# imediate record iteration:
+>>> for x in tf_record.tf_record_iterator( 'gs://tpu-usc1/tmp/foo.tfrecord' ): print(x)
+... 
+b'foo'
+b'bar'
+b'baz'
+b'waow'
+b'woo'
+b'yes'
+b'ok'
+b'baq'
+
+
+# graph-based record writing:
+from tensorflow.python.data.ops import readers
+from tensorflow.python.data.ops import writers
+
+>>> writer = writers.TFRecordWriter( 'gs://tpu-usc1/tmp/foo.tfrecord', compression_type="" )
+>>> writer
+<tensorflow.python.data.experimental.ops.writers.TFRecordWriter object at 0x1023d73d0>
+
+ds = tf.data.Dataset.from_tensor_slices(['foo', 'bar', 'baz', 'waow', 'woo', 'yes', 'ok'])
+r(writer.write(ds))
+
+>>> inds = readers.TFRecordDataset([ 'gs://tpu-usc1/tmp/foo.tfrecord' ]
+>>> el = data.enumerate_dataset()
+>>> el(inds)
+<DatasetV1Adapter shapes: ((), ()), types: (tf.int64, tf.string)>
+>>> ad = el(inds)
+it = ad.make_one_shot_iterator(); nxt = it.get_next()
