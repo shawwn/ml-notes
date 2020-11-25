@@ -4,6 +4,8 @@ import numpy as np
 import sys
 import os
 
+from tensorflow.python.platform import tf_logging as logging
+
 from tensorflow.python.tpu.ops import tpu_ops
 from tensorflow.python.tpu import tpu
 from tensorflow.compiler.tf2xla.python import xla
@@ -13,11 +15,11 @@ from tensorflow.python.tpu import device_assignment as device_assignment_lib
 from tensorflow.python.tpu import topology as topology_lib
 
 
-
 def after(op, then):
   op = [op] if not isinstance(op, (list, tuple)) else op
   with tf.control_dependencies(op):
-    return tf.identity(then())
+    #return tf.identity(then())
+    return then()
 
 
 def count_tpu_cores(session=None):
@@ -134,8 +136,9 @@ def table_obarray(session=None):
   #ks, vs = session.run(obarray.export_op)
   ks = obarray.export_op[0]
   #obarray.strings = tf.Variable(obarray.export_op[0:1], dtype=tf.string, shape=[None, 1], use_resource=True)
-  obarray.strings = tf.Variable(ks, dtype=tf.string, shape=ks.shape, use_resource=True)
-  session.run(obarray.strings.initializer)
+  obarray.strings = tf.Variable(ks, dtype=tf.string, shape=ks.shape, use_resource=True, trainable=False, collections=['local_variables'])
+  obarray.scratch = tf.Variable(-1, dtype=tf.int32, shape=[], use_resource=True, trainable=False, collections=['local_variables'])
+  session.run([obarray.strings.initializer, obarray.scratch.initializer])
   def intern(k):
     def cpu(k):
       i = obarray.lookup(k)
@@ -183,21 +186,23 @@ def table_example_2(*, session=None, **table_settings):
   return table
 
 
-def enq(*values, name):
+def enq(name, *values):
   return tpu_cpu(lambda vs: tf.raw_ops.Stage(values=vs, container=name, shared_name=name), values)
 
 def dtypes_of(xs):
   return [x.dtype if hasattr(x, 'dtype') else x for x in xs]
 
-def deq(*dtypes, name):
+def deq(name, *dtypes):
   return tpu_cpu(lambda: tf.raw_ops.Unstage(dtypes=dtypes_of(dtypes), container=name, shared_name=name))
 
 
 def enq_metric(name, *values):
-    return enq(get_or_create_global_step(), tpu_id(), tpu_now(), *values, name=name)
+    #return enq(name, get_or_create_global_step(), tpu_id(), tpu_now(), *values)
+    return enq(name, get_or_create_global_step(), tpu_id(), *values)
 
 def deq_metric(name, *dtypes):
-    return deq(tf.int64, tf.int32, tf.float64, *dtypes, name=name)
+    #return deq(name, tf.int64, tf.int32, tf.float64, *dtypes)
+    return deq(name, tf.int64, tf.int32, *dtypes)
 
 
 import functools
@@ -308,6 +313,34 @@ def get_or_create_global_step(graph=None):
 
 
 
+def create_sum_step(name, graph=None):
+  """Create global step tensor in graph.
+
+  Args:
+    graph: The graph in which to create the global step tensor. If missing, use
+      default graph.
+
+  Returns:
+    Global step tensor.
+
+  Raises:
+    ValueError: if global step tensor is already defined.
+  """
+  graph = graph or ops.get_default_graph()
+  # Create in proper graph and base name_scope.
+  with graph.as_default() as g, g.name_scope(None):
+    return variable_scope.get_variable(
+        name,
+        shape=[],
+        dtype=dtypes.int64,
+        initializer=init_ops.zeros_initializer(),
+        trainable=False,
+        use_resource=True,
+        aggregation=variables.VariableAggregation.SUM,
+        collections=[ops.GraphKeys.GLOBAL_VARIABLES])
+
+
+
 import gin
 
 def parse_string(s, included=[]):
@@ -336,4 +369,328 @@ def parse_string(s, included=[]):
       yield k, v
     else:
       raise Exception("Bad statement {}".format(statement))
+
+
+
+def difference(l1, l2):
+  """List difference"""
+  # TODO: support other types?
+  return [i for i in l1 + l2 if i not in l1 or i not in l2]
+
+
+#from tensorflow.python.tpu import tensor_tracer_report
+
+
+from tensorflow.python.ops import control_flow_util
+
+
+_DEVICE_TYPE_TPU = 'tpu'
+_DEVICE_TYPE_CPU = 'cpu'
+
+
+def loop_cond_op(op):
+  return op.type in ('LoopCond', 'RefLoopCond')
+
+
+def while_loop_op(op):
+  """Returns true if op is one of the special ops of in a while loop.
+
+  Args:
+     op: A tf.Operation.
+
+  Returns:
+     True if the given op is one of [Switch, Merge, Enter, Exit,
+     NextIteration, LoopCond], which are all building blocks for TF while
+     loops.
+  """
+  return  (control_flow_util.IsLoopSwitch(op) or
+           control_flow_util.IsLoopMerge(op) or
+           control_flow_util.IsLoopEnter(op) or
+           control_flow_util.IsLoopExit(op) or
+           loop_cond_op(op) or
+           op.type in ('RefNextIteration', 'NextIteration'))
+
+
+def control_flow_op(op):
+  """Returns true if op is one of the special ops of in a while loop.
+
+  Args:
+     op: A tf.Operation.
+
+  Returns:
+     True if the given op is one of [Switch, Merge, Enter, Exit,
+     NextIteration, LoopCond], which are all building blocks for TF while
+     loops.
+  """
+  return  (control_flow_util.IsSwitch(op) or
+           control_flow_util.IsMerge(op))
+
+
+def unsafe_op(op):
+  """Returns True if this op is not safe to be traced."""
+
+  # Reasons for not including following op types:
+  #    Assign: cause incorrect result with CPU tracing.
+  if op.type == 'Assign':
+    return True
+  return False
+
+
+def device_mismatch(device_type, op):
+  if device_type == _DEVICE_TYPE_TPU:
+    # pylint: disable=protected-access
+    return tpu._TPU_REPLICATE_ATTR not in op.node_def.attr
+    # pylint: enable=protected-access
+  return False
+
+
+def unsafe_scalar_trace(op):
+  """Return true if scalar output tensor from Op is not safe to be traced."""
+
+  # Tracing the following causes cycle in the graph on TPU.
+  if op.type in ('LoopCond', 'Enter', 'Merge', 'Const',
+                 'Switch', 'Less', 'ReadVariableOp'):
+    return True
+  # Tracing the following will cause casting-issue
+  # with the norm tracing mode or other compilation issues on CPU.
+  if op.type in ('VarHandleOp', 'IteratorToStringHandle',
+                 'IteratorGetNext', 'OneShotIterator',
+                 'IteratorV2', 'MakeIterator',
+                 'BatchDatasetV2', 'MapDataset',
+                 'FixedLengthRecordDataset', 'TakeDataset', 'ZipDataset',
+                 'Placeholder', 'PlaceholderWithDefault', 'StridedSlice'):
+    return True
+  return False
+
+
+
+
+def topological_sort(operations=None):
+  """Performs topological sort on the given graph.
+
+  Args:
+     operations: graph operations to sort topologically.
+
+  Returns:
+     A pair where the first element indicates if the topological
+     sort succeeded (True if there is no cycle found; False if a
+     cycle is found) and the second element is either the sorted
+     list of nodes or the cycle of nodes found.
+  """
+  if operations is None:
+    operations = tf.get_default_graph().get_operations()
+  def _is_loop_edge(op):
+    """Returns true if the op is the end of a while-loop creating a cycle."""
+    return op.type in ['NextIteration']
+
+  def _in_op_degree(op):
+    """Returns the number of incoming edges to the given op.
+
+    The edge calculation skips the edges that come from 'NextIteration' ops.
+    NextIteration creates a cycle in the graph. We break cycles by treating
+    this op as 'sink' and ignoring all outgoing edges from it.
+    Args:
+      op: Tf.Operation
+    Returns:
+      the number of incoming edges.
+    """
+    count = 0
+    for op in op.control_inputs + [in_tensor.op for in_tensor in op.inputs]:
+      if not _is_loop_edge(op):
+        count += 1
+    return count
+
+  sorted_ops = []
+  op_in_degree = {op: _in_op_degree(op) for op in operations}
+
+  frontier = [op for (op, degree) in op_in_degree.items() if degree == 0]
+  frontier.sort(key=lambda op: op.name)
+  while frontier:
+    op = frontier.pop()
+    # Remove the op from graph, and remove its outgoing edges.
+    sorted_ops.append(op)
+    if _is_loop_edge(op):
+      continue
+    # pylint: disable=protected-access
+    consumers = list(op._control_outputs)
+    # pylint: enable=protected-access
+    for out_tensor in op.outputs:
+      consumers += [consumer_op for consumer_op in out_tensor.consumers()]
+    consumers.sort(key=lambda op: op.name)
+    for consumer in consumers:
+      # For each deleted edge shift the bucket of the vertex.
+      op_in_degree[consumer] -= 1
+      if op_in_degree[consumer] == 0:
+        frontier.append(consumer)
+      if op_in_degree[consumer] < 0:
+        raise ValueError('consumer:%s degree mismatch'%consumer.name)
+
+  left_ops = set(op for (op, degree) in op_in_degree.items() if degree > 0)
+  if left_ops:
+    return (True, left_ops)
+  else:
+    assert len(operations) == len(sorted_ops)
+    return (False, sorted_ops)
+
+
+
+import collections
+
+
+def sort_tensors_and_ops(graph=None):
+  """Returns a wrapper that has consistent tensor and op orders."""
+  if graph is None:
+    graph = tf.get_default_graph()
+  graph_wrapper = collections.namedtuple('GraphWrapper',
+                                         ['graph', 'operations', 'op_to_idx',
+                                          'tensors', 'tensor_to_idx',
+                                          'contains_cycle',
+                                          'topological_order_or_cycle'])
+  contains_cycle, topological_order_or_cycle = topological_sort(graph.get_operations())
+  if not contains_cycle:
+    operations = topological_order_or_cycle
+  else:
+    operations = graph.get_operations()
+  op_to_idx = {op.name: index for index, op
+               in enumerate(operations)}
+  tensors = []
+  for op in operations:
+    tensors.extend(op.outputs)
+  tensor_to_idx = {tensor.name: index for index, tensor in
+                   enumerate(tensors)}
+  return graph_wrapper(graph=graph, operations=operations, op_to_idx=op_to_idx,
+                       tensors=tensors, tensor_to_idx=tensor_to_idx,
+                       contains_cycle=contains_cycle,
+                       topological_order_or_cycle=topological_order_or_cycle)
+
+
+
+def _process_tensor_fetches(tensor_fetches):
+  """Check that tensor_fetches is not empty and have valid tensors."""
+  # If none or empty list.
+  if tensor_fetches is None:
+    raise RuntimeError('tensor_fetches provided to tensor_tracer cannot be '
+                       'None.')
+  if not isinstance(tensor_fetches, (list, tuple)):
+    tensor_fetches = [tensor_fetches]
+  elif not tensor_fetches:
+    raise RuntimeError('tensor_fetches provided to tensor_tracer cannot be '
+                       'empty list.')
+  fetches = []
+  for fetch in tensor_fetches:
+    if isinstance(fetch, ops.Tensor):
+      fetches.append(fetch)
+    else:
+      raise RuntimeError('Given tensor_fetch:%s is not a tensor.' % fetch)
+  return fetches
+
+
+def _process_op_fetches(op_fetches):
+  """Check that op_fetches have valid ops."""
+  if op_fetches is None:
+    return []
+
+  if not isinstance(op_fetches, (list, tuple)):
+    op_fetches = [op_fetches]
+
+  fetches = []
+  for fetch in op_fetches:
+    if isinstance(fetch, ops.Operation):
+      fetches.append(fetch)
+    elif isinstance(fetch, ops.Tensor):
+      fetches.append(fetch.op)
+    else:
+      logging.warning('Ignoring the given op_fetch:%s, which is not an op.' %
+                      fetch)
+  return fetches
+
+
+def _get_op_control_flow_context(op):
+  """Returns the control flow of the given op.
+
+  Args:
+    op: tf.Operation for which the control flow context is requested.
+  Returns:
+    op_control_flow_context: which the is control flow context of the given
+    op. If the operation type is LoopExit, returns the outer control flow
+    context.
+  """
+  # pylint: disable=protected-access
+  op_control_flow_context = op._control_flow_context
+  # pylint: enable=protected-access
+  if control_flow_util.IsLoopExit(op):
+    op_control_flow_context = op_control_flow_context.outer_context
+  return op_control_flow_context
+
+
+def get_execution_ops(node, operations=None):
+  return _filter_execution_path_operations(get_all_fetches(node), operations=operations)
+
+
+def _filter_execution_path_operations(fetches, operations=None):
+  """Returns the set of ops in the execution path to compute given fetches."""
+  if operations is None:
+    operations = tf.get_default_graph().get_operations()
+
+  # If no fetch provided, then return all operations.
+  if fetches is None:
+    return list(operations)
+  # Convert to list, if a single element is provided.
+  if not isinstance(fetches, (list, tuple)):
+    fetches = [fetches]
+  # If a tensor is given as fetch, convert it to op.
+  op_fetches = []
+  for fetch in fetches:
+    if isinstance(fetch, ops.Operation):
+      op_fetches.append(fetch)
+    elif isinstance(fetch, ops.Tensor):
+      op_fetches.append(fetch.op)
+    else:
+      raise RuntimeError('Given fetch:%s is neither a tensor nor an op.'
+                         %fetch)
+
+  execution_path_operations_ordered = list(op_fetches)
+  execution_path_operations = set(op_fetches)
+  traverse_stack = list(op_fetches)
+  while True:
+    if not traverse_stack:
+      break
+    head_op = traverse_stack.pop()
+    input_ops = [tensor_input.op for tensor_input in head_op.inputs]
+    input_ops.extend(head_op.control_inputs)
+
+    for input_op in input_ops:
+      if input_op not in execution_path_operations:
+        # Filter out loop condition operations, tracing them causes a cycle.
+        # Trace only the loop-body.
+        if loop_cond_op(input_op):
+          continue
+        execution_path_operations.add(input_op)
+        execution_path_operations_ordered.append(input_op)
+        traverse_stack.append(input_op)
+  return execution_path_operations_ordered
+
+
+
+def get_all_fetches(tensor_fetches, op_fetches=None):
+    """Convert all non-operations (tensors, etc) into fetch operations.
+
+    Args:
+      tensor_fetches: a (list,tuple,or a single object) of tensor fetches
+        returned by model_fn given to session.run. Function must be provided
+        with as least one tensor to fetch.
+      op_fetches: A list of op fetches returned by model_fn given to
+        session.run. op_fetches and tensor_fetches are used to determine the
+        nodes that will be executed. Can be None.
+
+    Returns:
+      tensor_fetches: an exact copy of tensor_fetches that has additional
+                      dependencies.
+    Raises:
+      RuntimeError: If tensor_fetches is None or empty.
+    """
+    processed_t_fetches = _process_tensor_fetches(tensor_fetches)
+    op_fetches = _process_op_fetches(op_fetches)
+    all_fetches = op_fetches + [tensor.op for tensor in processed_t_fetches]
+    return all_fetches
 
