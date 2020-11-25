@@ -694,3 +694,76 @@ def get_all_fetches(tensor_fetches, op_fetches=None):
     all_fetches = op_fetches + [tensor.op for tensor in processed_t_fetches]
     return all_fetches
 
+import os
+
+
+def tf_trim_traceback(tb):
+  core = os.path.join('site-packages', 'tensorflow_core')
+  site = os.path.sep + 'site-packages' + os.path.sep
+  frames = []
+  is_core = []
+  for frame in tb:
+    file, line, function, code = frame
+    is_core.append(core in file)
+    if core in file:
+      file = '@tensorflow_core' + file.split(core, 1)[1]
+    if site in file:
+      file = '@' + file.split(site, 1)[1]
+    frames.append((file, line, function, code))
+  last_frame = None
+  while len(frames) > 0 and is_core[-1]:
+    last_frame = frames.pop()
+    is_core.pop()
+  if last_frame is not None:
+    frames.append(last_frame)
+  return frames
+
+
+import json
+
+
+def escape(s):
+  return json.dumps(s)
+
+
+import cachetools
+
+
+@cachetools.cached(cachetools.TTLCache(maxsize=128, ttl=2))
+def getcwd():
+  return os.getcwd()
+
+
+def pretty_traceback_frame(frame):
+  file, line, function, code = frame
+  cwd = getcwd()
+  if file.startswith(cwd):
+    file = file[len(cwd)+1:]
+  #return '\n  File {file}, line {line}, in {function}\n    {code}'.format(
+  return '{file}:{line} ({function}):\n    {code}'.format(
+      file=file, line=line, function=function, code=code)
+
+
+def pretty_traceback(tb):
+  return [pretty_traceback_frame(frame) for frame in tb][::-1]
+
+
+def tf_traceback(node, pretty=True, trim=True):
+  #fetches = get_all_fetches(node)
+  # assert len(fetches) > 0
+  # tb = fetches[0].traceback
+  #if isinstance(node, tf.Tensor):
+  if not isinstance(node, tf.Operation) and hasattr(node, 'op'):
+    node = node.op
+  tb = node.traceback
+  if trim:
+    tb = tf_trim_traceback(tb)
+  if pretty:
+    tb = pretty_traceback(tb)
+  return tb
+
+def tf_traceback_message(node):
+  return '\n'.join(['-------', repr(node)] + tf_traceback(node))
+
+def tf_tracebacks(nodes):
+  return '\n'.join([tf_traceback_message(node) for node in nodes])
