@@ -191,7 +191,10 @@ class ConditionalBatchNorm2d(nn.Module):
     with self.scope():
       scale = self.gamma_embed(y) + 1
       offset = self.beta_embed(y)
-      out = batchnorm(x, mean=self.bn.accumulated_mean, variance=self.bn.accumulated_var, scale=scale, offset=offset)
+      #out = batchnorm(x, mean=self.bn.accumulated_mean, variance=self.bn.accumulated_var, scale=scale, offset=offset)
+      out = self.bn(x)
+      out *= scale
+      out += offset
       return out
 
 
@@ -206,7 +209,10 @@ class ScaledCrossReplicaBN(nn.Module):
 
   def forward(self, input):
     with self.scope():
-      out = batchnorm(input, mean=self.bn.accumulated_mean, variance=self.bn.accumulated_var, scale=self.scale, offset=self.offset)
+      #out = batchnorm(input, mean=self.bn.accumulated_mean, variance=self.bn.accumulated_var, scale=self.scale, offset=self.offset)
+      out = self.bn(input)
+      out *= self.scale
+      out += self.offset
       return out
 
 

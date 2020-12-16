@@ -2242,9 +2242,9 @@ def init_(tensor, value):
   # tensor is a Variable?
   assert hasattr(tensor, 'initializer')
   assert hasattr(tensor, '_initializer_op')
-  # and additionaly is a ResourceVariable? TODO: handle normal variables.
-  if not hasattr(tensor, 'handle'):
-    raise NotImplementedError("TODO: support non-resource ops; for now just use reource ops everywhere")
+  # # and additionaly is a ResourceVariable? TODO: handle normal variables.
+  # if not hasattr(tensor, 'handle'):
+  #   raise NotImplementedError("TODO: support non-resource ops; for now just use reource ops everywhere")
   # # overwrite its initializer.
   # #tensor._initializer_op, tensor._is_initialized_op = create_initializer_op(
   # initializer_op, is_initialized_op = create_initializer_op(
@@ -3131,13 +3131,20 @@ class _BatchNorm(_NormBase):
                 exponential_average_factor = self.momentum
 
             if self.training and self.track_running_stats:
-                # TODO: if statement only here to tell the jit to skip emitting this when it is None
+                # # TODO: if statement only here to tell the jit to skip emitting this when it is None
+                # if self.accumulation_counter is not None:
+                #     self.accumulation_counter = self.accumulation_counter + 1
+                #     if self.momentum is None:  # use cumulative moving average
+                #         exponential_average_factor = 1.0 / float(self.accumulation_counter)
+                #     else:  # use exponential moving average
+                #         exponential_average_factor = self.momentum
                 if self.accumulation_counter is not None:
-                    self.accumulation_counter = self.accumulation_counter + 1
                     if self.momentum is None:  # use cumulative moving average
-                        exponential_average_factor = 1.0 / float(self.accumulation_counter)
+                        exponential_average_factor = 1.0 / tf.max(1.0, tf.cast(self.accumulation_counter, tf.float32))
                     else:  # use exponential moving average
                         exponential_average_factor = self.momentum
+                    self.register_update('batchnorm_increment_accumulation_counter', self.accumulation_counter.assign_add(1, read_value=False))
+                          
 
             r"""
             Decide whether the mini-batch stats should be used for normalization rather than the buffers.
@@ -3162,14 +3169,14 @@ class _BatchNorm(_NormBase):
 
 
 def batch_norm(input, mean, variance, weight, bias, training, exponential_average_factor, variance_epsilon):
-  # # TODO: exponential_average_factor
-  # out = tf.nn.batch_normalization(input, mean, variance, offset=bias, scale=weight, variance_epsilon=variance_epsilon)
-  inv_var = tf.math.rsqrt(variance + variance_epsilon)
-  weight_v = 1.0 if weight is None else weight
-  bias_v = 0.0 if bias is None else bias
-  alpha = inv_var * weight_v
-  beta = bias_v - mean * alpha
-  out = input * alpha + beta
+  # TODO: exponential_average_factor
+  out = tf.nn.batch_normalization(input, mean, variance, offset=bias, scale=weight, variance_epsilon=variance_epsilon)
+  # inv_var = tf.math.rsqrt(variance + variance_epsilon)
+  # weight_v = 1.0 if weight is None else weight
+  # bias_v = 0.0 if bias is None else bias
+  # alpha = inv_var * weight_v
+  # beta = bias_v - mean * alpha
+  # out = input * alpha + beta
   return out
 
 
