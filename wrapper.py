@@ -313,6 +313,11 @@ if __name__ == '__main__':
         allow_soft_placement=True,
         isolate_session_state=False,
         )
+    # share variables across sessions on TPUs
+    session_config.experimental.share_session_state_in_clusterspec_propagation = True
+
+    # TODO: research this. What does it do?
+    # session_config.share_cluster_devices_in_session = True
     
     master = None
     res = None
