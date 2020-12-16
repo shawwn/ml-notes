@@ -655,7 +655,7 @@ class Module(object):
         self.__dict__['_output'] = [result]
         return result
 
-    def _named_members(self, get_members_fn, prefix='', recurse=True):
+    def named_members(self, get_members_fn, prefix='', recurse=True):
         r"""Helper method for yielding various names + members of modules."""
         memo = set()
         modules = self.named_modules(prefix=prefix) if recurse else [(prefix, self)]
@@ -697,7 +697,7 @@ class Module(object):
             (string, Operation[]): Tuple containing the name and updates
 
         """
-        gen = self._named_members(
+        gen = self.named_members(
             lambda module: module._updates.items(),
             prefix=prefix, recurse=recurse)
         for elem in gen:
@@ -747,7 +747,7 @@ class Module(object):
             >>>        print(param.size())
 
         """
-        gen = self._named_members(
+        gen = self.named_members(
             lambda module: module._parameters.items(),
             prefix=prefix, recurse=recurse)
         for elem in gen:
@@ -795,7 +795,7 @@ class Module(object):
             >>>        print(buf.size())
 
         """
-        gen = self._named_members(
+        gen = self.named_members(
             lambda module: module._buffers.items(),
             prefix=prefix, recurse=recurse)
         for elem in gen:
