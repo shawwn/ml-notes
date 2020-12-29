@@ -166,6 +166,7 @@ def _parse_topology(self, serialized):
 
     self._mesh_shape = np.array(proto.mesh_shape, dtype=np.int32)
     if len(self._mesh_shape) != 4 or any(self._mesh_shape < 1):
+      return __parse_topology(self, serialized)
       raise ValueError("`mesh_shape` must be a vector of size 4 with positive "
                        "entries; got {}".format(self._mesh_shape))
 
@@ -199,6 +200,8 @@ __invert_topology = topology_lib.Topology._invert_topology
 
 def _invert_topology(self):
   """Inverts a [task,device,axis] topology to [x,y,z] -> task/device maps."""
+  if len(self.mesh_shape) != 4 or any(self.mesh_shape < 1):
+    return __invert_topology(self)
   tasks = np.full(list(self.mesh_shape), -1, dtype=np.int32)
   devices = np.full(list(self.mesh_shape), -1, dtype=np.int32)
   for task in range(self.device_coordinates.shape[0]):
